@@ -185,6 +185,19 @@ static void test_fat_new_range ()
 		d.put32 (h.fat + h.sec, h.off, 0x00000005);
 		refused (d, sdgrow::NotOurVolume);
 	}
+	// FAT 1 is read whole: a stray entry in a sector the sampling (first, last, every 64th) misses is found,
+	// also across a chunk's edge (16 sectors) and in the sector before the last
+	{
+		uint64_t tgt = expect (s); uint64_t lastE = (tgt - overhead (s)) / kSpc + 1, lastSec = lastE * 4 / 512;
+		for (uint32_t sec : {firstSec + 1, firstSec + 7, firstSec + 15, firstSec + 16, firstSec + 17, firstSec + 100, (uint32_t) lastSec - 1})
+		{
+			MemDisk d; build (d, s);
+			d.put8 (fat1 + sec, 300, 1);
+			refused (d, sdgrow::NotOurVolume);
+		}
+		MemDisk d; build (d, s); d.put8 (fat2 + firstSec + 7, 300, 1);	// FAT 2 stays sampled: documented, not found
+		CHECK (sdgrow::grow (d).status == Grown);
+	}
 	// the last sector of the new range, in either FAT
 	for (uint32_t fat : {fat1, fat2})
 	{

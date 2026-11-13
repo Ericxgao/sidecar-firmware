@@ -16,6 +16,12 @@ public:
 	virtual uint64_t sectors () const = 0;		// the whole device
 	virtual bool read (uint64_t lba, void *pSector) = 0;
 	virtual bool write (uint64_t lba, const void *pSector) = 0;
+	// n sectors in one go (the FAT check); the default is n single reads, the kernel's disk reads them in one command
+	virtual bool readSectors (uint64_t lba, void *p, uint32_t n)
+	{
+		for (uint32_t i = 0; i < n; i++) if (!read (lba + i, (uint8_t *) p + 512 * (uint64_t) i)) return false;
+		return true;
+	}
 };
 
 enum Status

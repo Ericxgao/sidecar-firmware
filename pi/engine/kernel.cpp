@@ -123,9 +123,10 @@ class CEmmcDisk : public sdgrow::Disk
 public:
 	explicit CEmmcDisk (CEMMCDevice *pEMMC) : m_pEMMC (pEMMC) {}
 	uint64_t sectors () const override { u64 n = m_pEMMC->GetSize (); return n == (u64) -1 ? n : n / 512; }
-	bool read (uint64_t lba, void *pSector) override
+	bool read (uint64_t lba, void *pSector) override { return readSectors (lba, pSector, 1); }
+	bool readSectors (uint64_t lba, void *p, uint32_t n) override	// one multi-block command
 	{
-		return m_pEMMC->Seek (lba * 512) == lba * 512 && m_pEMMC->Read (pSector, 512) == 512;
+		return m_pEMMC->Seek (lba * 512) == lba * 512 && m_pEMMC->Read (p, n * 512) == (int) (n * 512);
 	}
 	bool write (uint64_t lba, const void *pSector) override
 	{
@@ -346,12 +347,14 @@ boolean CKernel::Initialize (void)
 		// the SD image's first boot: the partition and the FAT32 volume stretch to the card, before anything mounts it.
 		// The boot screen has bars only, no text line, so the result is in the log alone.
 		CEmmcDisk Disk (&m_EMMC);
+		unsigned tg = m_Timer.GetClockTicks ();
 		sdgrow::Result g = sdgrow::grow (Disk);
+		tg = (m_Timer.GetClockTicks () - tg) / 1000;
 		if (g.status == sdgrow::Grown)
-			m_Logger.Write (From, LogNotice, "SD: grew the card from %u MB to %u MB", (unsigned) (g.oldSectors >> 11), (unsigned) (g.newSectors >> 11));
+			m_Logger.Write (From, LogNotice, "SD: grew the card from %u MB to %u MB (check and writes took %u ms)", (unsigned) (g.oldSectors >> 11), (unsigned) (g.newSectors >> 11), tg);
 		else if (g.status == sdgrow::IoError || g.status == sdgrow::VerifyFailed)
 			m_Logger.Write (From, LogWarning, "SD: grow stopped at step %d: %s", g.failStep, sdgrow::text (g.status));
-		else m_Logger.Write (From, LogNotice, "SD: not grown: %s", sdgrow::text (g.status));
+		else m_Logger.Write (From, LogNotice, "SD: not grown: %s (%u ms)", sdgrow::text (g.status), tg);
 	}
 	else m_Logger.Write (From, LogNotice, "SD: not grown: %s", bTestMode ? "engine test mode" : "sdgrow=0");
 	BootStep (1);

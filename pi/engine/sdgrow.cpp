@@ -81,19 +81,29 @@ Result grow (Disk &rDisk)
 	if (target <= tot) return done (Full, tot);
 	if (!resume && target - tot < kMinGain) return done (SmallGain, tot);
 
-	// the FATs must really be oversized: the entries of the clusters to be added are zero in both FATs. Not every
-	// sector (up to 64 MiB a FAT at the cap): the first and the last of the range and one in every 64 between.
+	// the FATs must really be oversized: the entries of the clusters to be added are zero in both FATs. FAT 1 is read
+	// whole over the range, in chunks (up to 64 MiB at the cap, once, at the first boot); FAT 2 is sampled: the first
+	// and the last sector of the range and one in every 64 between.
 	{
 		const uint64_t firstE = (tot - overhead) / kSpc + 2, lastE = clusters + 1;
 		const uint64_t s0 = firstE * 4 / 512, s1 = lastE * 4 / 512;
-		for (int fat = 0; fat < 2; fat++)
-			for (uint64_t sec = s0; sec <= s1; sec = sec == s1 ? s1 + 1 : (sec + 64 < s1 ? sec + 64 : s1))
-			{
-				alignas (16) uint8_t f[512];
-				if (!rDisk.read (start + kRsv + fat * (uint64_t) fatsz + sec, f)) return done (IoError, part);
-				for (uint32_t i = sec == s0 ? (uint32_t) (firstE * 4 % 512) : 0; i < (sec == s1 ? (uint32_t) (lastE * 4 % 512) + 4 : 512u); i++)
-					if (f[i]) return done (NotOurVolume, part);
-			}
+		const uint32_t firstOff = (uint32_t) (firstE * 4 % 512), lastEnd = (uint32_t) (lastE * 4 % 512) + 4;
+		alignas (16) static uint8_t chunk[16 * 512];		// Circle's EMMC reads whole words; static: not on the 16 KB-ish stack
+		for (uint64_t sec = s0; sec <= s1;)
+		{
+			uint32_t n = s1 - sec + 1 < 16 ? (uint32_t) (s1 - sec + 1) : 16;
+			if (!rDisk.readSectors (start + kRsv + sec, chunk, n)) return done (IoError, part);
+			for (uint32_t i = sec == s0 ? firstOff : 0; i < n * 512u; i++)
+				if (chunk[i] && !(sec + i / 512 == s1 && i % 512 >= lastEnd)) return done (NotOurVolume, part);
+			sec += n;
+		}
+		for (uint64_t sec = s0; sec <= s1; sec = sec == s1 ? s1 + 1 : (sec + 64 < s1 ? sec + 64 : s1))
+		{
+			alignas (16) uint8_t f[512];
+			if (!rDisk.read (start + kRsv + fatsz + sec, f)) return done (IoError, part);
+			for (uint32_t i = sec == s0 ? firstOff : 0; i < (sec == s1 ? lastEnd : 512u); i++)
+				if (f[i]) return done (NotOurVolume, part);
+		}
 	}
 
 	// the write order of the layout contract; the first mismatch stops it
