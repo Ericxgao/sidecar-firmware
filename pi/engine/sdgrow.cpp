@@ -26,7 +26,7 @@ struct Edit { int off; uint32_t value; };
 
 int patch (Disk &rDisk, uint64_t lba, const Edit &e)
 {
-	uint8_t s[512], b[512];
+	alignas (16) uint8_t s[512], b[512];
 	if (!rDisk.read (lba, s)) return IoError;
 	put32 (s + e.off, e.value);
 	if (!rDisk.write (lba, s)) return IoError;
@@ -41,7 +41,7 @@ Result grow (Disk &rDisk)
 	const uint64_t card = rDisk.sectors ();
 	if (card == 0 || card == ~0ull) return done (NoRoom, 0);
 
-	uint8_t mbr[512], bs[512], bk[512], fi[512], fb[512];
+	alignas (16) uint8_t mbr[512], bs[512], bk[512], fi[512], fb[512];	// Circle's EMMC reads and writes whole words
 	if (!rDisk.read (0, mbr)) return done (IoError, 0);
 	if (mbr[510] != 0x55 || mbr[511] != 0xAA) return done (NoMbr, 0);
 	const uint8_t *e0 = mbr + 446;
@@ -71,7 +71,7 @@ Result grow (Disk &rDisk)
 	const uint64_t reach = (uint64_t) fatsz * 128 - 2;
 	if (clusters > reach) clusters = reach;
 	if (clusters > kMaxClusters) clusters = kMaxClusters;
-	if (clusters > (0xFFFFFFFFull - overhead) / kSpc) clusters = (0xFFFFFFFFull - overhead) / kSpc;
+	if (clusters > (0xFFFFFFFFull - start - overhead) / kSpc) clusters = (0xFFFFFFFFull - start - overhead) / kSpc;	// the entry's 32 bits hold the end too
 	const uint64_t target = overhead + clusters * kSpc;
 
 	// the partition and the volume agree, or this is a cut run's leftover: the partition already at the target
@@ -80,6 +80,21 @@ Result grow (Disk &rDisk)
 	if (start + part > card) return done (NoRoom, part);
 	if (target <= tot) return done (Full, tot);
 	if (!resume && target - tot < kMinGain) return done (SmallGain, tot);
+
+	// the FATs must really be oversized: the entries of the clusters to be added are zero in both FATs. Not every
+	// sector (up to 64 MiB a FAT at the cap): the first and the last of the range and one in every 64 between.
+	{
+		const uint64_t firstE = (tot - overhead) / kSpc + 2, lastE = clusters + 1;
+		const uint64_t s0 = firstE * 4 / 512, s1 = lastE * 4 / 512;
+		for (int fat = 0; fat < 2; fat++)
+			for (uint64_t sec = s0; sec <= s1; sec = sec == s1 ? s1 + 1 : (sec + 64 < s1 ? sec + 64 : s1))
+			{
+				alignas (16) uint8_t f[512];
+				if (!rDisk.read (start + kRsv + fat * (uint64_t) fatsz + sec, f)) return done (IoError, part);
+				for (uint32_t i = sec == s0 ? (uint32_t) (firstE * 4 % 512) : 0; i < (sec == s1 ? (uint32_t) (lastE * 4 % 512) + 4 : 512u); i++)
+					if (f[i]) return done (NotOurVolume, part);
+			}
+	}
 
 	// the write order of the layout contract; the first mismatch stops it
 	// FSInfo first: "unknown" is as valid for the old size as for the new, so a cut never leaves a stale count

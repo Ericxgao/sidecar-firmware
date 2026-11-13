@@ -3,6 +3,8 @@
 #pragma once
 #include <stdint.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <map>
 #include <vector>
 #include "sdgrow.h"
@@ -20,8 +22,10 @@ struct MemDisk : sdgrow::Disk
 	int cutAfter = -1;	// >= 0: this many writes work, then every write fails (a power cut)
 	bool lie = false;	// writes "succeed" and store nothing
 	uint64_t sectors () const override { return total; }
+	static void aligned (const void *p) { if (((uintptr_t) p & 15) != 0) { fprintf (stderr, "sector buffer %p not 16-byte aligned\n", p); exit (1); } }
 	bool read (uint64_t lba, void *p) override
 	{
+		aligned (p);
 		if (lba >= total) return false;
 		auto it = m.find (lba);
 		if (it == m.end ()) memset (p, 0, 512); else memcpy (p, it->second.data (), 512);
@@ -29,6 +33,7 @@ struct MemDisk : sdgrow::Disk
 	}
 	bool write (uint64_t lba, const void *p) override
 	{
+		aligned (p);
 		if (lba >= total || (cutAfter >= 0 && writes >= cutAfter)) return false;
 		writes++;
 		if (!lie) m[lba] = Sec ((const uint8_t *) p, (const uint8_t *) p + 512);

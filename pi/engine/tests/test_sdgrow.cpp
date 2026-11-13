@@ -133,6 +133,8 @@ static void test_cap ()
 	  sdgrow::Result r = sdgrow::grow (d); CHECK (r.status == sdgrow::Grown); CHECK (r.newSectors == reach - kSpc); CHECK (kStart + r.newSectors <= s.cardSectors); }
 }
 
+// Torn sector writes are not modelled: every edit is a 4-byte field inside one sector, so a half-written sector
+// is either the old or the new value of that field.
 static void test_power_cut ()
 {
 	Spec s; MemDisk clean; build (clean, s); sdgrow::grow (clean);
@@ -165,6 +167,58 @@ static void test_verify_and_io ()
 	{ MemDisk d; d.total = 1 << 20; sdgrow::Result r = sdgrow::grow (d); CHECK (r.status == sdgrow::NoMbr); CHECK (d.writes == 0); }	// an empty card
 }
 
+// M2: the FAT entries of the clusters to be added must be zero (both FATs), or the card is not the image's
+static void test_fat_new_range ()
+{
+	Spec s; s.cardSectors = 1ull << 22; s.volClusters = 2000; s.capClusters = 100000;	// 2 GiB card: the new range spans about 500 FAT sectors
+	uint32_t fz = fatsz (s.capClusters);
+	uint32_t fat1 = kStart + kRsv, fat2 = kStart + kRsv + fz;
+	uint32_t firstE = s.volClusters + 2, firstSec = firstE * 4 / 512;
+	// a non-zero entry in the new range: first entry, last sector, a sampled sector in between; either FAT
+	struct { uint32_t fat, sec, off; } hits[] = {
+		{fat1, firstSec, (firstE * 4) % 512}, {fat2, firstSec, (firstE * 4) % 512},
+		{fat1, firstSec + 64, 100}, {fat2, firstSec + 64, 100},	// the sampled ones: every 64th {fat1, firstSec, 508 /* the sector's last entry */},
+	};
+	for (auto &h : hits)
+	{
+		MemDisk d; build (d, s);
+		d.put32 (h.fat + h.sec, h.off, 0x00000005);
+		refused (d, sdgrow::NotOurVolume);
+	}
+	// the last sector of the new range, in either FAT
+	for (uint32_t fat : {fat1, fat2})
+	{
+		MemDisk d; build (d, s);
+		uint64_t tgt = expect (s); uint64_t lastE = (tgt - overhead (s)) / kSpc + 1;
+		d.put32 (fat + lastE * 4 / 512, (lastE * 4) % 512, 0x0FFFFFFF);
+		refused (d, sdgrow::NotOurVolume);
+	}
+	// entries of the old clusters (before the new range, the same sector) may be anything
+	{ MemDisk d; build (d, s); d.put32 (fat1 + firstSec, (firstE * 4) % 512 - 4, 0x0FFFFFFF); CHECK (sdgrow::grow (d).status == Grown); }
+	// a cut run's second pass has the same zero FATs and finishes
+	{ MemDisk d; build (d, s); d.cutAfter = 3; sdgrow::grow (d); d.cutAfter = -1; CHECK (sdgrow::grow (d).status == Grown); }
+}
+
+// L2: the start LBA counts in the 32-bit limit of the partition entry
+static void test_u32_limit ()
+{
+	Spec s; s.cardSectors = 1ull << 34; s.capClusters = 268000000; s.volClusters = 2000;
+	MemDisk d; build (d, s);
+	sdgrow::Result r = sdgrow::grow (d);
+	CHECK (r.status == Grown);
+	CHECK (kStart + r.newSectors <= 0xFFFFFFFFull);
+	CHECK (mbrCount (d) == r.newSectors);
+}
+
+// M1: the engine's test modes (testsecs=) and sdgrow=0 never grow
+static void test_allowed ()
+{
+	CHECK (sdgrow::allowed (1, false));
+	CHECK (!sdgrow::allowed (0, false));
+	CHECK (!sdgrow::allowed (1, true));
+	CHECK (!sdgrow::allowed (0, true));
+}
+
 int main ()
 {
 	test_grows_fresh ();
@@ -174,6 +228,9 @@ int main ()
 	test_cap ();
 	test_power_cut ();
 	test_verify_and_io ();
+	test_fat_new_range ();
+	test_u32_limit ();
+	test_allowed ();
 	for (int s = 0; s <= sdgrow::VerifyFailed; s++) CHECK (sdgrow::text ((Status) s)[0] != 0);
 	printf ("test_sdgrow: ok\n");
 	return 0;

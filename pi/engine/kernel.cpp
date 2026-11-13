@@ -334,8 +334,14 @@ boolean CKernel::Initialize (void)
 		else m_Logger.Write (From, LogNotice, "boot screen: %ux%u in %u us", m_pDisplay->GetFrameWidth (),
 				     m_pDisplay->GetFrameHeight (), m_Timer.GetClockTicks () - ts);
 	}
+	// the engine test modes (testsecs=, a build of its own) never change the card; the release build has none
+#ifdef SIDECAR_PI5_TESTMODE
+	const boolean bTestMode = m_nTestSecs != 0;
+#else
+	const boolean bTestMode = FALSE;
+#endif
 	if (!m_EMMC.Initialize ()) m_Logger.Write (From, LogError, "SD: no card");
-	else if (m_Options.GetAppOptionDecimal ("sdgrow", 1) != 0)
+	else if (sdgrow::allowed ((int) m_Options.GetAppOptionDecimal ("sdgrow", 1), bTestMode))
 	{
 		// the SD image's first boot: the partition and the FAT32 volume stretch to the card, before anything mounts it.
 		// The boot screen has bars only, no text line, so the result is in the log alone.
@@ -347,7 +353,7 @@ boolean CKernel::Initialize (void)
 			m_Logger.Write (From, LogWarning, "SD: grow stopped at step %d: %s", g.failStep, sdgrow::text (g.status));
 		else m_Logger.Write (From, LogNotice, "SD: not grown: %s", sdgrow::text (g.status));
 	}
-	else m_Logger.Write (From, LogNotice, "SD: sdgrow=0, the card is left as it is");
+	else m_Logger.Write (From, LogNotice, "SD: not grown: %s", bTestMode ? "engine test mode" : "sdgrow=0");
 	BootStep (1);
 	// the big fixed buffers, reserved once here from Circle's heap (cached normal memory, as .bss) rather than in .bss,
 	// which counts toward KERNEL_MAX_SIZE: the send FX's 4.8 MB, the core's (bridge::heap_bytes). Never freed, never

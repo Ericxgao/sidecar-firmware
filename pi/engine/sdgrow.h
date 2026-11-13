@@ -41,6 +41,10 @@ struct Result
 
 const uint64_t kMinGain = 64ull * 1024 * 1024 / 512;	// sectors: the least a grow must add
 
+// Whether the boot may grow at all: sdgrow=1 (the default) and not an engine test mode (testsecs=), which says the
+// card is not the engine's to change.
+inline bool allowed (int option, bool testMode) { return option != 0 && !testMode; }
+
 Result grow (Disk &rDisk);
 const char *text (Status s);	// a short reason for the log
 
