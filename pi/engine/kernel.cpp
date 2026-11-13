@@ -4,6 +4,7 @@
 // (selftest.h). Cores 1-3: cores.cpp.
 #include "kernel.h"
 #include "idlewait.h"
+#include "sdgrow.h"		// the first boot's grow of the SD image
 #include "ob_follow.h"	// CObFollow::HaltResets (/status "usbhalt")
 #include "mbtrace.h"
 #include "blackbox_pi.h"	// the black box (2026-10-30): the whole log appended to /.rytm/blackbox.log
@@ -116,6 +117,23 @@ static const char From[] = "engine";
 // BenchChains' results (core 0, before cores 1-3), LogBench's rows: [0] the master chain, [1..] the send TYPE insert sets
 static const int ChainBenches = 3;
 static struct { u64 nTicks; u32 nWorst; } s_ChainBench[ChainBenches];
+// sdgrow.h's disk: the whole card through CEMMCDevice (whole 512-byte sectors only; GetSize is in bytes, -1 if unknown)
+class CEmmcDisk : public sdgrow::Disk
+{
+public:
+	explicit CEmmcDisk (CEMMCDevice *pEMMC) : m_pEMMC (pEMMC) {}
+	uint64_t sectors () const override { u64 n = m_pEMMC->GetSize (); return n == (u64) -1 ? n : n / 512; }
+	bool read (uint64_t lba, void *pSector) override
+	{
+		return m_pEMMC->Seek (lba * 512) == lba * 512 && m_pEMMC->Read (pSector, 512) == 512;
+	}
+	bool write (uint64_t lba, const void *pSector) override
+	{
+		return m_pEMMC->Seek (lba * 512) == lba * 512 && m_pEMMC->Write (pSector, 512) == 512;
+	}
+private:
+	CEMMCDevice *m_pEMMC;
+};
 static const char RebootMagic[] = "RYTM-REBOOT";
 static volatile boolean s_bRebootRequested = FALSE;
 static void RebootRequest (void) { s_bRebootRequested = TRUE; }   // UART IRQ: core 0's loop stops cleanly first
@@ -317,6 +335,19 @@ boolean CKernel::Initialize (void)
 				     m_pDisplay->GetFrameHeight (), m_Timer.GetClockTicks () - ts);
 	}
 	if (!m_EMMC.Initialize ()) m_Logger.Write (From, LogError, "SD: no card");
+	else if (m_Options.GetAppOptionDecimal ("sdgrow", 1) != 0)
+	{
+		// the SD image's first boot: the partition and the FAT32 volume stretch to the card, before anything mounts it.
+		// The boot screen has bars only, no text line, so the result is in the log alone.
+		CEmmcDisk Disk (&m_EMMC);
+		sdgrow::Result g = sdgrow::grow (Disk);
+		if (g.status == sdgrow::Grown)
+			m_Logger.Write (From, LogNotice, "SD: grew the card from %u MB to %u MB", (unsigned) (g.oldSectors >> 11), (unsigned) (g.newSectors >> 11));
+		else if (g.status == sdgrow::IoError || g.status == sdgrow::VerifyFailed)
+			m_Logger.Write (From, LogWarning, "SD: grow stopped at step %d: %s", g.failStep, sdgrow::text (g.status));
+		else m_Logger.Write (From, LogNotice, "SD: not grown: %s", sdgrow::text (g.status));
+	}
+	else m_Logger.Write (From, LogNotice, "SD: sdgrow=0, the card is left as it is");
 	BootStep (1);
 	// the big fixed buffers, reserved once here from Circle's heap (cached normal memory, as .bss) rather than in .bss,
 	// which counts toward KERNEL_MAX_SIZE: the send FX's 4.8 MB, the core's (bridge::heap_bytes). Never freed, never
