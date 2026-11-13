@@ -1,5 +1,5 @@
 // pi/engine/sdgrow.cpp - the first boot's grow of the SD image (sdgrow.h). The write order keeps every step's
-// state bootable: the partition entry first, then the backup boot sector, the boot sector, then FSInfo's free count.
+// state bootable: FSInfo's free count first, then the partition entry, the backup boot sector, the boot sector.
 // A run that finds the partition larger than the volume is a cut one: it finishes the same target.
 #include "sdgrow.h"
 #include <string.h>
@@ -82,12 +82,13 @@ Result grow (Disk &rDisk)
 	if (!resume && target - tot < kMinGain) return done (SmallGain, tot);
 
 	// the write order of the layout contract; the first mismatch stops it
+	// FSInfo first: "unknown" is as valid for the old size as for the new, so a cut never leaves a stale count
 	const struct { uint64_t lba; Edit e; } steps[5] = {
+		{start + kFsInfo, {488, 0xFFFFFFFFu}},		// the free count: unknown, FatFs counts it; next free stays
+		{start + kBackupFsInfo, {488, 0xFFFFFFFFu}},
 		{0, {446 + 12, (uint32_t) target}},
 		{start + kBackup, {32, (uint32_t) target}},
 		{start, {32, (uint32_t) target}},
-		{start + kFsInfo, {488, 0xFFFFFFFFu}},		// the free count: unknown, FatFs counts it; next free stays
-		{start + kBackupFsInfo, {488, 0xFFFFFFFFu}},
 	};
 	for (int i = 0; i < 5; i++)
 	{

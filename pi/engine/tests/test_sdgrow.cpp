@@ -142,27 +142,20 @@ static void test_power_cut ()
 		d.cutAfter = cut;
 		sdgrow::Result r = sdgrow::grow (d);
 		CHECK (r.status == sdgrow::IoError && r.failStep == cut + 1);
-		// the half-grown card is a card the next boot understands: the partition never smaller than the volume, the
-		// volume never larger than the partition (which is what FatFs mounts)
+		// the half-grown card is one the next boot understands: the volume never larger than the partition
 		CHECK (mbrCount (d) >= bootTot (d));
 		d.cutAfter = -1; d.writes = 0;
 		r = sdgrow::grow (d);
-		if (cut < 3)	// the boot sector still the old: finished now
-		{
-			CHECK (r.status == sdgrow::Grown);
-			CHECK (diff (clean.m, d.m).empty ());
-		}
-		else		// the size is complete; only FSInfo's free count may still be the old one
-		{
-			CHECK (r.status == sdgrow::Full);
-			CHECK (mbrCount (d) == bootTot (d) && bootTot (d) == bootTot (d, kStart + 6) && mbrCount (d) == mbrCount (clean));
-		}
+		// every cut ends right: all sizes, and FSInfo unknown
+		CHECK (r.status == sdgrow::Grown);
+		CHECK (diff (clean.m, d.m).empty ());
+		CHECK (d.get32 (kStart + 1, 488) == 0xFFFFFFFFu && d.get32 (kStart + 7, 488) == 0xFFFFFFFFu);
 	}
-	// a cut after a step, twice in a row
-	{ MemDisk d; build (d, s); d.cutAfter = 1; sdgrow::grow (d); d.cutAfter = 1; d.writes = 0; sdgrow::Result r = sdgrow::grow (d); CHECK (r.status == sdgrow::IoError);
+	// a cut after the MBR, twice in a row
+	{ MemDisk d; build (d, s); d.cutAfter = 3; sdgrow::grow (d); d.cutAfter = 4; d.writes = 0; sdgrow::Result r = sdgrow::grow (d); CHECK (r.status == sdgrow::IoError);
 	  d.cutAfter = -1; CHECK (sdgrow::grow (d).status == sdgrow::Grown); CHECK (diff (clean.m, d.m).empty ()); }
 	// a resumed card moved to a card of another size is refused, not guessed at
-	{ MemDisk d; build (d, s); d.cutAfter = 1; sdgrow::grow (d); d.cutAfter = -1; d.writes = 0; d.total = kStart + volSectors (s) + 200000; refused (d, sdgrow::NotOurVolume); }
+	{ MemDisk d; build (d, s); d.cutAfter = 3; sdgrow::grow (d); d.cutAfter = -1; d.writes = 0; d.total = kStart + volSectors (s) + 200000; refused (d, sdgrow::NotOurVolume); }
 }
 
 static void test_verify_and_io ()

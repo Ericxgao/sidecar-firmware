@@ -36,7 +36,7 @@ struct Result
 	Status status;
 	uint64_t oldSectors;	// the partition before
 	uint64_t newSectors;	// after (Grown), else the same as old
-	int failStep;		// IoError / VerifyFailed on a write: 1..5 (MBR, backup boot, boot, FSInfo, backup FSInfo); 0 = a read
+	int failStep;		// IoError / VerifyFailed on a write: 1..5 (FSInfo, backup FSInfo, MBR, backup boot, boot); 0 = a read
 };
 
 const uint64_t kMinGain = 64ull * 1024 * 1024 / 512;	// sectors: the least a grow must add
