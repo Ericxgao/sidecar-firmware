@@ -1480,6 +1480,15 @@ uint32_t render_voices(int16_t (*ring)[kVoices], int ring_len, int w, int v0, in
     if (v[i].li && v[i].live) livein::post(i, ring, stv[i] ? ring_r : nullptr, row, kBlock);
 #endif
 #endif
+  {   // kVoiceGain (voices.h): every voice's rows after its chain, rounded (Q15; nothing over int16 since the gain is < 1)
+    static_assert(kVoiceGain > 0.0f && kVoiceGain <= 1.0f, "kVoiceGain: a cut");
+    constexpr int32_t q = (int32_t)(kVoiceGain * 32768.0f + 0.5f);
+    for (int i = v0; i < v1; ++i)
+      for (int s = 0; s < kBlock; ++s) {
+        ring[row[s]][i] = (int16_t)((ring[row[s]][i] * q + 16384) >> 15);
+        if (stv[i]) ring_r[row[s]][i] = (int16_t)((ring_r[row[s]][i] * q + 16384) >> 15);
+      }
+  }
   for (int i = v0; i < v1; ++i) {   // CC 120: the silenced voices ramp out (5 ms), a trig brings them back (1 ms)
     float g = silence_gain[i];
     bool down = silenced[i];

@@ -1,10 +1,13 @@
 // core/tests/test_voice_levels.cpp - the voices' levels: LEV 0 is silence on DAISYSP and PLAITS (no 0.05 floor), PLAITS'
-// LEV and velocity scale its output (an output gain: Plaits' own decay envelope stays).
+// LEV and velocity scale its output (an output gain: Plaits' own decay envelope stays), and every engine at its default
+// knobs (64, LEV 100), full velocity, peaks under the output stage's knee (core::MainOut, -12 dBFS ceiling) once
+// kVoiceGain (voices.h) is applied.
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
 #include "check.h"
+#include "main_out.h"
 #include "voices.h"
 
 using namespace core;
@@ -65,6 +68,24 @@ int main() {
     CHECK(std::fabs(db(mid, hi) - 20 * std::log10(64.0 / 127)) < 1.0);
     CHECK(std::fabs(db(v20, v127) - 20 * std::log10(20.0 / 127)) < 1.0);
     CHECK(z < 1);
+  }
+  // every engine, default knobs, vel 127: the voice row's peak under the knee (kKnee x kLimit = -15.1 dBFS), so no
+  // engine reaches the ceiling's soft limiting at its defaults. The loudest measured: DAISYSP STRING (-16.4 dBFS)
+  {
+    const int knee = (int)(MainOut::kKnee * MainOut::kLimit * 32768.0f);
+    int worst = 0;
+    auto at = [&](int vb, std::vector<float> p, int blocks) {
+      int pk = peak_of(vb, 127, p, blocks);
+      CHECK(pk < knee);
+      worst = pk > worst ? pk : worst;
+    };
+    for (int z = 0; z < kPlaitsEngs; ++z)
+      at(kPlaits, {(z * 128 + 64) / 17.0f, 64, 64, 64, 64, 64, 64, 100, 64, 64, 0, 0, 0, 120, 0, 100}, kSec / 2);
+    for (int m = 0; m < 3; ++m) at(kDaisy, {(m * 128 + 64) / 3.0f, 64, 64, 64, 0, 64, 64, 100, 64, 64, 0, 0, 0, 0, 0, 0}, kSec);
+    for (int pat = 0; pat < 128; pat += 16) at(kJuno, {(float)pat, 64, 64, 64, 64, 64, 64, 100, 64, 64, 64, 64, 64, 64, 64, 64}, kSec / 2);
+    for (int pat = 0; pat < 32; pat += 4) at(kFm, {(float)pat, 64, 64, 64, 64, 64, 64, 100, 64, 64, 64, 64, 64, 64, 64, 64}, kSec / 2);
+    for (int e = 0; e < 128; e += 16) at(kMd, {(float)e, 64, 64, 64, 64, 64, 64, 100, 64, 64, 64, 64, 64, 64, 64, 64}, kSec / 2);
+    printf("loudest engine at its defaults: %d (%.1f dBFS), the knee %d\n", worst, 20 * std::log10(worst / 32768.0), knee);
   }
   printf("test_voice_levels: PASS\n");
   return 0;

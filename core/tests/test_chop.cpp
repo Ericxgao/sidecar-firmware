@@ -1043,7 +1043,8 @@ static void test_resample() {
   wg::trig(kC, vi, 60, 127, P((float)C("A002"), slc_v(2)));
   run(5);
   std::vector<float> o = render(vi, 9000, true);
-  CHECK(rms(o, 1000, 8000) > 0.05 && std::fabs(zc(o, 1000, 8000) - hz_of_slice(2)) < 10);   // the take: its tone, driven
+  // the take: its tone, driven (taken from the voice's rows, so at kVoiceGain: voices.h)
+  CHECK(rms(o, 1000, 8000) > 0.05 * kVoiceGain && std::fabs(zc(o, 1000, 8000) - hz_of_slice(2)) < 10);
   run(1200);
   CHECK(file_of(chop::map_file(vi)).find(std::string("sample=") + ss.wav) != std::string::npos);
   printf("test_chop: RESAMPLE's card time on the control core: %llu us\n", (unsigned long long)(host_card_us(3) - c3));

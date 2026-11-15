@@ -163,6 +163,16 @@ void voice_play(int vi, int note, int vel);
 // stereo pair (L != R somewhere), for the output stage's PAN law (one byte a voice: cores render disjoint voices).
 // Null: mono only, as before (the Teensy, the tests).
 enum { kMFm, kMJuno, kMDsps, kMDaisy, kMMd, kMPlaits, kMUser, kMachines };
+// Every voice's level on its way out: render_voices scales each voice's rows (L and R) by kVoiceGain after the voice's
+// INSERT chain, so every path a voice takes gets it alike (TRK, out=main, OUT PRE / POST and the send FX, the recorder's
+// taps, the Teensy's return). Why (owner's decision 2026-11-15): the engines write o x 0.7 (-3 dBFS) and peaked at
+// -3..-8 dBFS at their default knobs (LEV 100, the rest 64, vel 127), but the output stage limits every voice at
+// -12 dBFS (core/main_out.h), so most engines were clipped by up to 10 dB. Measured at the defaults (the voice row
+// before this gain): DAISYSP STRING -4.4 dBFS (the loudest; -2.7 at DMP 0), PLAITS MODAL -5.2, MD -5.4, a 0 dBFS
+// sample on DSP SAMPLE / SAMPLER at LEV 100 -5.5, PLAITS CHORDS -7.7, DAISYSP MODAL -6.7, JUNO -8.0, 6-OP FM -11.0,
+// WAVETABLE -18.8. 0.25 (-12.0 dB) puts the loudest at -16.4 dBFS, a little under the limit's knee (-15.1 dBFS); the
+// engines' 0.7 target lands on the knee itself, and the engines keep their levels against each other.
+constexpr float kVoiceGain = 0.25f;
 uint32_t render_voices(int16_t (*ring)[kVoices], int ring_len, int w, int v0, int v1, uint64_t* mach,
                        int16_t (*ring_r)[kVoices] = nullptr, uint8_t* st = nullptr);
 // DSP SAMPLE's DEC on PRE / POST (core/fx/out.h): its trig / note-off counters (the control core bumps, the render
