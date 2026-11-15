@@ -815,6 +815,10 @@ SOFTWARE.
 
 Its source headers read "Copyright (c) 2016 airwindows, Airwindows uses the MIT license".
 
+The same licence covers plugins/ufx_galactic (the user effect GALACTIC): a port to C of Airwindows' Galactic
+(github.com/airwindows/airwindows, master of 2026-11-15, plugins/LinuxVST/src/Galactic); the changes are listed in
+plugins/ufx_galactic/galactic.c, the licence text is also in plugins/ufx_galactic/LICENSE.airwindows.
+
 ------------------------------------------------------------------------------
 Archivo Black font (the "Sidecar" wordmark: pi/ui/sidecar_wordmark.c bitmaps and the web page's subset)
 Licence: SIL Open Font License 1.1, Copyright 2017 The Archivo Black Project Authors (http://scripts.sil.org/OFL).

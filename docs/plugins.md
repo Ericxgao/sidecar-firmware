@@ -902,6 +902,42 @@ slot's TYPE moves to another effect: TYPE back to BBD can replay the old repeats
 
 Defaults: TIME 40 (FREE, about 240 ms), FDBK 56, W/F 24, TONE 80.
 
+### NIMBUS (plugins/ufx_nimbus, `fx.nimbus`, MIT)
+
+A big ambient reverb with an ensemble: a pad that follows the harmony of what is sent to it (the idea of the Strymon
+Cloudburst's ensemble; written for this repo). 48 band analysers a semitone apart (C3 .. B6) listen to the send; the
+bands that stand out each drive a sine at the frequency they heard (nothing is retuned to a grid), with a slow swell
+and a release that follows the decay time, through a three-voice string-ensemble chorus, into the reverb. The reverb:
+a 25 ms pre-delay, four modulated allpass diffusers a side, 16 delay lines mixed by a Hadamard matrix. The lines live
+in the slot arena (610 KB for each of its two states). Drums make the pad too: a kick or a snare with a clear pitch
+leaves a held tone.
+
+| Knob | Label | Values | What it does |
+|---|---|---|---|
+| P2 | DCY | 0..127 | the decay time, 0.5 s .. 64 s, exponential (64: about 6 s; 96: about 20 s) |
+| P3 | ENS | 0..127 | how much of the pad goes into the reverb; 0 is the reverb alone |
+| P4 | TONE | 0..127 | the damping in the reverb's loop, 500 Hz .. 18 kHz |
+| P5 | MOD | 0..127 | the depth of the delay lines' slow modulation, x0 .. x2 (64: as designed) |
+
+Defaults: DCY 96, ENS 64, TONE 80, MOD 64.
+
+### GALACTIC (plugins/ufx_galactic, `fx.galactic`, MIT)
+
+Airwindows' Galactic by Chris Johnson, ported to C: a huge, soft, drifting space made for endless washes. Kept: the
+whole signal path at its 1x rate, the delay times, the knob laws. Changed: the delay memory is 32-bit float in the
+slot arena (528 KB for each of its two states), the send's mono sum feeds both sides (the stereo comes from the
+pre-delay vibrato's two phases), always fully wet, 12 dB of gain on the output so it sits level with the other send
+FX, no dither. With Detune at 0 the port equals Airwindows' own code to -92 dB (a null test on the Mac).
+
+| Knob | Label | Values | What it does |
+|---|---|---|---|
+| P2 | REPL | 0..127 | Replace: how fast new sound replaces the old. Low: the tail regenerates for longer; 0 holds what is in it and lets nothing new in |
+| P3 | BRT | 0..127 | Brightness: the low-pass before and after the tank |
+| P4 | DTUN | 0..127 | Detune: the speed of the pre-delay's vibrato, the drifting, chorused character |
+| P5 | BIG | 0..127 | Bigness: the size of the space (every delay time) |
+
+Defaults: REPL 38, BRT 64, DTUN 64, BIG 127.
+
 **Tests and tools.** `core/tests/test_ufx.cpp` loads both packages (kept built in core/tests/api3_pkgs: `make -C
 plugins/ufx_phaser fixtures`, `make -C plugins/ufx_bbd fixtures`) and plays them through the send FX: the labels, the
 phaser's notches against theory, feedback, spread and tempo sync, the delay's timing, darkening, hiss, feedback decay
@@ -910,6 +946,10 @@ through each native build into plugins/build-wav/ for listening (`make -C plugin
 first; `--p1..--p4`, `--bpm`). `core/tests/bench/ufx_bench.sh` builds each render with the Pi's flags and costs it with
 the A72 model: PHASER about 1.9 k instructions and 1.5 k model cycles a 12-frame block, BBD 3.4 k and 2.5 k (the send
 FX's budget for one call is 120 us: about 180 k cycles on a Pi 4 at 1.5 GHz).
+`core/tests/test_ufx_ambient.cpp` does the same for NIMBUS and GALACTIC (`make -C plugins/ufx_nimbus fixtures`, `make -C
+plugins/ufx_galactic fixtures`): the labels, the decay and tone knobs, the ensemble's pad, stereo, the loudest
+settings, NaN and denormals. The A72 model: NIMBUS about 52 k instructions and 41 k model cycles a block (the dearest
+effect: about a quarter of one call's budget on a Pi 4 by the model, which is a floor), GALACTIC 12 k and 12 k.
 
 ## 13. Presets
 
