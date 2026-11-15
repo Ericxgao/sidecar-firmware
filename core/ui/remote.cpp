@@ -95,6 +95,7 @@ constexpr int kMaskBytes = 3 + 37;
 // remote_tick at least kInputMs after the last frame). The Rytm renders at 20 Hz: a frame waits for its next render
 // either way, so this is the host's part of the round trip, not more frames on the screen. 1020: 50 ms, no input path.
 constexpr uint32_t kTickMs = 25, kInputMs = 8, kAliveMs = 250;
+constexpr uint32_t kScreenTurnMs = 1500;   // 0.5.0 screens: how long a turned knob stays named on the title bar and in the bottom bar
 // 0.4.3 (rytm-lag): every commit (39) makes the Rytm run its whole stock draw and panel diff (rytm-mods 0026 ev_tick
 // sets ctrl + 0x20), bounded by its 156 250 baud panel link. While the Rytm's transport plays, a page that redraws by
 // itself (the SRC view's values, SCOPE, a playhead) commits at most every kPlayCommitMs (5 a second, as the SEQ page's
@@ -411,6 +412,8 @@ struct State {
   uint32_t commit_ms = 0;    // 0.4.3: the last page / SRC view commit (kPlayCommitMs) and what it showed (page_key)
   int commit_page = -1000;
   int touched = -1;          // the encoder turned last (0..7): its cell's tiles go first, the bottom bar names it
+  uint32_t touch_ms = 0;     // 0.5.0 screens: when (they name the knob for kScreenTurnMs; touched / src_last >= 0 say it is set)
+  uint32_t src_last_ms = 0;  // ... the SRC view's last changed knob
   // the local echo (3F) as the Rytm has it: per encoder the slot (kEchoNone: none), the value, flags and prefix
   uint8_t echo_slot[8], echo_val[8], echo_flags[8];
   char echo_pre[8][12];
@@ -717,7 +720,7 @@ CORE_COLD void on_enc(int e, int delta, bool func) {
     return;
   }
   if (s.voice < 0 || src_capable || e < 0 || e > 7) return;
-  s.touched = e;
+  s.touched = e, s.touch_ms = now_ms();
   const Page* p = page_for_voice(named_machine(machine_of_voice(s.voice), s.voice), s.voice);
   if (!p || p->enc[e] == kNone) return;
   int k = p->enc[e] & 15, cur = (int)mod::base_of(s.voice, k, v[s.voice].p[k]);
@@ -841,10 +844,11 @@ CORE_COLD void send_echoes(const Page* p, int vi) {
     int ci = -1;
     const Cell* c = p && !s.legacy && p->enc[e] != kNone ? cell_of(*p, p->enc[e], &ci) : nullptr;
     if (c && c->kind != kList && !src_value_name(*p, p->enc[e], vsrc)) {   // (a source's name: the frame shows it)
-      slot = kSlotFoot;
+      slot = (uint8_t)voice_screen_echo_slot(p, e);
+      if (!slot) slot = kEchoNone;
       val = (uint8_t)v_param(vi, p->enc[e]);
       fl = 1 | (c->kind == kKnobBi || c->kind == kPan ? 2 : 0);   // FUNC x 8 as step_value; bipolar shown signed
-      sniprintf(pre, sizeof pre, CORE_STR("%s %s:"), voice_label(vi), p->label[e]);
+      if (slot == kSlotFoot) sniprintf(pre, sizeof pre, CORE_STR("%s %s:"), voice_label(vi), p->label[e]);
     }
     if (s.echo_valid && s.echo_slot[e] == slot && (slot == kEchoNone || (s.echo_val[e] == val && s.echo_flags[e] == fl &&
                                                                            !strcmp(s.echo_pre[e], pre))))
@@ -1038,8 +1042,11 @@ CORE_COLD void frame(uint32_t ms) {
     char right[12];
     vsrc.vi = s.voice;
     sniprintf(right, sizeof right, "%s", tag[0] ? tag : voice_label(s.voice));
-    drawn = view.draw(work, *p, vsrc, right, at, n);
-    voice_footer(*p, voice_label(s.voice), vsrc, s.touched >= 0 ? s.touched : 0);
+    const bool turned = s.touched >= 0 && turn_live(ms, s.touch_ms, kScreenTurnMs);   // 0.5.0 screens: a turn names the knob for a moment
+    if (!voice_screen(work, view, *p, vsrc, right, at, n, turned ? s.touched : -1, false, &drawn)) {
+      drawn = view.draw(work, *p, vsrc, right, at, n);
+      voice_footer(*p, voice_label(s.voice), vsrc, s.touched >= 0 ? s.touched : 0);
+    }
   } else if (x) {
     view.invalidate();
     x->draw(work, at, n, ms);
@@ -1186,11 +1193,13 @@ CORE_COLD void src_tick(uint32_t ms) {
 #else
     sniprintf(right, sizeof right, "%s", kTrackName[t]);
 #endif
-    int drawn = view.draw(work, *p, tsrc, right, 0, 0);
-    int e = 0;
-    for (int i = 0; i < 8; ++i)
-      if (s.src_last >= 0 && p->enc[i] == s.src_last) e = i;
-    voice_footer(*p, kTrackName[t], tsrc, e);
+    int drawn = 0;
+    const int e = enc_of_param(*p, s.src_last);   // -1: a parameter on no knob of this page (a CC, a lock): no knob named
+    const bool turned = e >= 0 && turn_live(ms, s.src_last_ms, kScreenTurnMs);
+    if (!voice_screen(work, view, *p, tsrc, right, 0, 0, turned ? e : -1, true, &drawn)) {
+      drawn = view.draw(work, *p, tsrc, right, 0, 0);
+      voice_footer(*p, kTrackName[t], tsrc, e < 0 ? 0 : e);
+    }
     s.stats.widgets += (uint32_t)drawn;
     uint32_t mask[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
     uint64_t texts = 0;
@@ -1844,7 +1853,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         midim::report(kTrackVoice[t], -1, 0, w);
       }
 #endif
-      if (b[2] == 1) s.src_last = (int8_t)b[1];
+      if (b[2] == 1) s.src_last = (int8_t)b[1], s.src_last_ms = now_ms();
       else if (t == s.src_track) src_list_quiet();   // a kit's values at once (a load): no list for its SRC
       if (t == s.src_track) {   // drawn at once (the input path), a burst coalesced to its latest values
         s.input = true;
