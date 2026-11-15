@@ -1453,7 +1453,9 @@ uint32_t render_voices(int16_t (*ring)[kVoices], int ring_len, int w, int v0, in
     x.mod.trigger = x.trig ? 1.0f : 0.0f;
     x.trig = false;
     x.voice.Render(x.patch, x.mod, f, kBlock);
-    float aux = x.p[10] / 127.0f, gain = x.p[15] / 100.0f * 0.7f;   // AUX, VOL
+    // AUX, VOL; LEV x velocity (x.level) as an output gain: Plaits reads mod.level only with level_patched, which
+    // would make its LPG a level gate and drop the DEC envelope, so the level goes here (LEV 127, full velocity: as before)
+    float aux = x.p[10] / 127.0f, gain = x.p[15] / 100.0f * 0.7f * x.level;
     for (int s = 0; s < kBlock; ++s) ring[row[s]][i] = clip16((f[s].out * (1 - aux) + f[s].aux * aux) * gain);
   }
   // a mono machine on PRE / POST: L = R before its stereo chain (the user slots, FM, JUNO, ... wrote L only)

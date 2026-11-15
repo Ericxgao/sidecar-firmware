@@ -460,7 +460,8 @@ void render_add(int vi, float* l, float* r, bool stereo) {
         I.trig = false;
         plaits::Voice::Frame f[kBlock];
         I.voice.Render(I.patch, I.mod, f, kBlock);
-        float aux = x.p[10] / 127.0f, gain = x.p[15] / 100.0f / 32767.0f;   // AUX, VOL (the mono voice's, without its 0.7)
+        // AUX, VOL, LEV x velocity (the mono voice's output gain, voices.cpp, without its 0.7)
+        float aux = x.p[10] / 127.0f, gain = x.p[15] / 100.0f / 32767.0f * I.level;
         for (int s = 0; s < kBlock; ++s) o[s] = (f[s].out * (1 - aux) + f[s].aux * aux) * gain;
         break;
       }

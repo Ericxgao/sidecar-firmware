@@ -1,4 +1,5 @@
-// core/tests/test_voice_levels.cpp - the voices' levels: LEV 0 is silence on DAISYSP (no 0.05 floor).
+// core/tests/test_voice_levels.cpp - the voices' levels: LEV 0 is silence on DAISYSP and PLAITS (no 0.05 floor), PLAITS'
+// LEV and velocity scale its output (an output gain: Plaits' own decay envelope stays).
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -50,6 +51,20 @@ int main() {
     printf("DAISYSP STRING: LEV 0 %d; DMP 64: LEV 64 %d, 32 %d\n", z, hi, lo);
     CHECK(z < 1);   // -90 dBFS is 1.04 counts
     CHECK(db(lo, hi) < -6.0 && db(lo, hi) > -12.0);
+  }
+  // PLAITS VA (ENG zone 5 of 17), VOL 100: LEV 127 against 64 by the levels' ratio, VEL 127 velocity 20 against 127
+  // too; LEV 0 silent
+  {
+    auto P = [](float lev, float sens) {
+      return std::vector<float>{(5 * 128 + 64) / 17.0f, 64, 64, 64, 64, 64, 64, lev, 64, 64, 0, 0, 0, sens, 0, 100};
+    };
+    int hi = peak_of(kPlaits, 127, P(127, 120), kSec / 2), mid = peak_of(kPlaits, 127, P(64, 120), kSec / 2);
+    int v127 = peak_of(kPlaits, 127, P(127, 127), kSec / 2), v20 = peak_of(kPlaits, 20, P(127, 127), kSec / 2);
+    int z = peak_of(kPlaits, 127, P(0, 120), kSec / 2, 200);
+    printf("PLAITS VA: LEV 127 %d, 64 %d, 0 %d; VEL 127: vel 127 %d, vel 20 %d\n", hi, mid, z, v127, v20);
+    CHECK(std::fabs(db(mid, hi) - 20 * std::log10(64.0 / 127)) < 1.0);
+    CHECK(std::fabs(db(v20, v127) - 20 * std::log10(20.0 / 127)) < 1.0);
+    CHECK(z < 1);
   }
   printf("test_voice_levels: PASS\n");
   return 0;
