@@ -1017,9 +1017,11 @@ static void test_resample() {
   CHECK(samp::config().src == samp::kSrcIn && samp::config().max_s == 7 && !strcmp(samp::config().name, "MINE"));
   uint64_t mach[kMachines] = {0};
   int16_t (*lr)[16] = nullptr;
+  std::vector<float> rows;   // the voice's rows as the take records them, in the voice's units before kVoiceGain
   auto take = [&]() {
     for (int b = 0; b < 48000 / kBlock && chop::resample_state() == chop::kRsPlaying; ++b) {
       render_voices(g_ring, kBlock, 0, 0, kVoices, mach);
+      for (int s = 0; s < kBlock; ++s) rows.push_back(g_ring[s][vi] / (32768.0f * kVoiceGain));
       samp::voice_block(g_ring, kBlock, lr);
       if (b % 4 == 0) run(1);
     }
@@ -1043,8 +1045,11 @@ static void test_resample() {
   wg::trig(kC, vi, 60, 127, P((float)C("A002"), slc_v(2)));
   run(5);
   std::vector<float> o = render(vi, 9000, true);
-  // the take: its tone, driven (taken from the voice's rows, so at kVoiceGain: voices.h)
-  CHECK(rms(o, 1000, 8000) > 0.05 * kVoiceGain && std::fabs(zc(o, 1000, 8000) - hz_of_slice(2)) < 10);
+  // the take: its tone, driven, at the level the voice had before kVoiceGain (voices.h): the sampler's voice tap undoes
+  // the gain, so a resampled slice plays as loud as the one it replaces (and not 9 dB under it, each generation)
+  double lr_db = 20 * std::log10(rms(o, 1000, 8000) / (100.0 / 127) / rms(rows, 1000, 8000));   // (less the take's LEV 100)
+  printf("test_chop: RESAMPLE take against the voice's own level: %+.2f dB\n", lr_db);
+  CHECK(rms(o, 1000, 8000) > 0.05 && std::fabs(lr_db) < 1.0 && std::fabs(zc(o, 1000, 8000) - hz_of_slice(2)) < 10);
   run(1200);
   CHECK(file_of(chop::map_file(vi)).find(std::string("sample=") + ss.wav) != std::string::npos);
   printf("test_chop: RESAMPLE's card time on the control core: %llu us\n", (unsigned long long)(host_card_us(3) - c3));
