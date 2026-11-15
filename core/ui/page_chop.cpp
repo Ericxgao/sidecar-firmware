@@ -219,7 +219,7 @@ CORE_COLD void ed_draw(Canvas& c, int page, int npages, uint32_t ms) {
   const chop::Slice& s = m->s[ed.sel];
   bool lazy = chop::lazy_on(vi);
   const chop::Lazy* lz = lazy ? chop::lazy_state(vi) : nullptr;
-  const bool turning = ed.touched >= 0 && ms - ed.turn_ms < (uint32_t)kTurnMs;
+  const bool turning = ed.touched >= 0 && turn_live(ms, ed.turn_ms, kTurnMs);
   // the title: the view, the bank the T keys select in, * for an unsaved map (the old bottom bar's facts); the right box
   // the track and the slice's length, black "ALL n" when the edit target is every slice, "n TAPS" while LAZY listens
   char title[24], right[16], l[12];
@@ -228,9 +228,10 @@ CORE_COLD void ed_draw(Canvas& c, int page, int npages, uint32_t ms) {
     sniprintf(title, sizeof title, "LAZY: TAP PADS");
     sniprintf(right, sizeof right, CORE_STR("%d TAPS"), lz ? lz->n : 0);
   } else {
-    sniprintf(title, sizeof title, CORE_STR("CHOP %s B%d%s"), kViewNames[ed.view], ed.bank + 1, chop::map_dirty(vi) ? " *" : "");
+    sniprintf(title, sizeof title, CORE_STR("CHOP %s B%d"), kViewNames[ed.view], ed.bank + 1);
     sniprintf(right, sizeof right, CORE_STR("%s %sS"), t >= 0 ? kTrackNames[t] : "V", l);
     if (t < 0) sniprintf(right, sizeof right, CORE_STR("V%d %sS"), vi + 1, l);
+    if (chop::map_dirty(vi)) sniprintf(right, sizeof right, CORE_STR("* %sS"), l);   // (the unsaved mark here: the title stays short)
     if (ed.all) sniprintf(right, sizeof right, CORE_STR("ALL %d"), m->n);
   }
   uint32_t a, b;
@@ -283,7 +284,7 @@ CORE_COLD void ed_draw(Canvas& c, int page, int npages, uint32_t ms) {
   }
   const int tt = turning && lab[ed.touched][0] ? ed.touched : -1;   // (a knob without a field: nothing to name)
   header(c, tt >= 0 ? full[tt] : title, page, npages, right);
-  if (ed.all && !lazy) {   // ALL: the right box turns black, with clear text: the target is not one slice
+  if (ed.all && !lazy && !header_tag_on()) {   // ALL: the right box turns black, with clear text: the target is not one slice
     int dots = npages > 1 ? (npages > 12 ? 12 : npages) : 0;
     int sep = kW - 2 - dots * 4 - 1 - (int)strlen(right) * kRSmall.advance - 2;
     c.fill(Rect{(int16_t)(sep + 1), 0, (int16_t)(kW - sep - 1), kHeaderH}, kOff);
@@ -507,7 +508,7 @@ CORE_COLD void chop_draw(Canvas& cv, const Rect& r, const Cell& c, const Source&
 CORE_COLD void chop_src_screen(Canvas& c, const Page& p, const Source& s, const char* right, int page, int npages, int touched, bool src_view) {
   static const char* const kFull[8] = {"SAMPLE", "SLICE", "TUNE", "MORPH", "SEED", "NEIGHBOUR CHANCE", "VELOCITY", "LEVEL"};
   c.clear();
-  header(c, touched >= 0 ? kFull[touched] : p.title, page, npages, right);
+  header(c, touched >= 0 ? fit_title(kFull[touched], p.label[touched], npages, right) : p.title, page, npages, right);
   Rect r = cell(0, 0, 4, 1);
   src_draw(c, r, kChopSrcCells[0], s, kSlotCells);
   for (int e = 0; e < 4; ++e) cell_label(c, e, 0, p.label[e], touched == e);

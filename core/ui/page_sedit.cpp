@@ -159,7 +159,7 @@ CORE_COLD void sedit_draw(Canvas& c, int page, int npages, uint32_t ms) {
     return;
   }
   const bool modal = pg.ask != kAskNone;
-  const bool turning = !modal && pg.turn_e >= 0 && ms - pg.turn_ms < (uint32_t)kTurnMs;
+  const bool turning = !modal && pg.turn_e >= 0 && turn_live(ms, pg.turn_ms, kTurnMs);
   static const char* const kFull[5] = {"REGION START", "REGION END", "ZOOM", "VIEW", "FUNCTION"};
   static const char* const kShort[5] = {"START", "END", "ZOOM", "VIEW", "FUNC"};
   header(c, turning ? kFull[pg.turn_e] : "SAMPLE EDIT", page, npages, name);
@@ -168,8 +168,7 @@ CORE_COLD void sedit_draw(Canvas& c, int page, int npages, uint32_t ms) {
   char b[kTextLen + 1], s0[12], s1[12];
   secs_text(v.a, v.rate, s0, sizeof s0);
   secs_text(v.b, v.rate, s1, sizeof s1);
-  const sedit::View& vv = v;
-  const char* fn = sedit::kFnNames[vv.fn < sedit::kFns ? vv.fn : 0];
+  const char* fn = sedit::kFnNames[v.fn < sedit::kFns ? v.fn : 0];
   if (!modal) {   // under a modal the page's text items are not put (the Rytm draws them over the pixels)
     static const char* const kNames[4] = {"STRT", "END", "ZOOM", "VIEW"};
     static const char* const kTag[sedit::kFns] = {"CROP", "NORM", "TRIM", "FD IN", "FD OUT", "REV", "GAIN+3", "GAIN-3"};
@@ -181,7 +180,7 @@ CORE_COLD void sedit_draw(Canvas& c, int page, int npages, uint32_t ms) {
       c.put_text(kSlotLabels + i, kRSmall, i * kCellW + kCellW / 2, kNamesY, t, (uint8_t)(kAlignCentre | (on ? kTextInvert : 0)));
     }
     c.fill(Rect{0, kInfoY - 1, kCellW, 7});   // E: the function as a filled tag
-    c.put_text(kSlotLabels + 4, kRSmall, kCellW / 2, kInfoY, kTag[vv.fn < sedit::kFns ? vv.fn : 0], (uint8_t)(kAlignCentre | kTextInvert));
+    c.put_text(kSlotLabels + 4, kRSmall, kCellW / 2, kInfoY, kTag[v.fn < sedit::kFns ? v.fn : 0], (uint8_t)(kAlignCentre | kTextInvert));
     sniprintf(b, sizeof b, CORE_STR("%s-%sS"), s0, s1);
     c.put_text(kSlotFree, kRSmall, kCellW + 4, kInfoY, b, kAlignLeft);
     sniprintf(b, sizeof b, CORE_STR("%sX%d"), v.dirty ? "* " : "", 1 << v.zoom);   // (the window's zoom: X1 X2 .. X256)
@@ -194,7 +193,7 @@ CORE_COLD void sedit_draw(Canvas& c, int page, int npages, uint32_t ms) {
     pg.pick = (uint8_t)clampi(pg.pick, 0, n - 1);
     static const char* const kDesc[3] = {"TRACK USES IT", "NEW FILE", "NOTHING SAVED"};
     modal_box(c, Rect{4, 11, 120, 42});
-    c.put_text(kSlotFree, kRSmall, 64, 14, "SAVE THE REGION  A: PICK", kAlignCentre);
+    c.put_text(kSlotFree, kRSmall, 64, 14, "SAVE REGION  A: PICK", kAlignCentre);
     dotted_h(c, 5, 122, 21);
     for (int i = 0; i < n; ++i) {
       int y = 24 + 9 * i;

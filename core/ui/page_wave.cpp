@@ -529,14 +529,13 @@ CORE_COLD void smpl_screen(Canvas& c, const Page& p, const Source& s, const char
   const bool grain = &p == &kGrainPageDt;
   const Cell* cells = grain ? kSmplGrainCells : kSmplCells;
   c.clear();
-  header(c, touched >= 0 ? (grain ? kFullGrain : kFullSmpl)[touched] : p.title, page, npages, right);
-  Rect r = cell(0, 0, 4, 1), wave = {1, 10, 96, 16};
+  header(c, touched >= 0 ? fit_title((grain ? kFullGrain : kFullSmpl)[touched], p.label[touched], npages, right) : p.title, page, npages, right);
+  Rect wave = {1, 10, 96, 16};
   c.clip(wave);
   const char* mode = "GRAIN";
   if (grain) draw_grain(c, Rect{0, 9, 96, 22}, cells[0], s, -1, 95);
   else mode = draw_sample(c, Rect{0, 9, 96, 22}, cells[0], s, -1, 95);
   c.unclip();
-  (void)r;
   box_word(c, kSlotCells, 3, 0, mode, 28);
   for (int e = 0; e < 4; ++e) cell_label(c, e, 0, p.label[e], touched == e);
   for (int e = 4; e < 8; ++e) cell_label(c, e - 4, 1, p.label[e], touched == e);
@@ -579,7 +578,7 @@ CORE_COLD bool voice_screen(Canvas& c, PageView& view, const Page& p, const Sour
   for (const char* q = right ? right : ""; *q; ++q) mix((uint8_t)*q);
   mix((uint32_t)page), mix((uint32_t)npages), mix((uint32_t)(touched + 1)), mix(src_view);
   for (int i = 0; i < 16; ++i) mix((uint32_t)s.param(i));
-  mix((uint32_t)s.code(0));
+  mix((uint32_t)s.code(0)), mix((uint32_t)(s.voice() + 1));
   if (!*drawn && last_p == &p && last_h == h) return true;
   last_p = &p, last_h = h;
   ++*drawn;

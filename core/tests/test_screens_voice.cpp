@@ -94,6 +94,14 @@ int main() {
   scr_shot("grain_idle.png", c);
   CHECK(draw(gp, s, 2, true) && !strcmp(slot(kSlotTitle).s, "GRAIN SIZE") && !strcmp(slot(kSlotFoot).s, "SIZE") && !strcmp(slot(kSlotFoot + 1).s, "70"));
   scr_shot("grain_turning_size.png", c);
+  {   // on the Sidecar's own page the ring's dots and a tag narrow the title bar: a whole name that does not fit gives way to the label
+    int dr = 0;
+    s.p[13] = 70;
+    CHECK(voice_screen(c, view, *gp, s, "V1", 3, 12, 1, false, &dr));
+    CHECK(!strcmp(slot(kSlotTitle).s, "POS"));   // "GRAIN POSITION" (70 px) beside 12 dots and "V1"
+    CHECK(voice_screen(c, view, *gp, s, "BD", 0, 0, 1, true, &dr) && !strcmp(slot(kSlotTitle).s, "GRAIN POSITION"));
+    CHECK(draw(gp, s, 2, true));
+  }
   // a second draw with nothing changed draws nothing; a changed knob or touch draws again
   int drawn = 0;
   CHECK(voice_screen(c, view, *gp, s, "BD", 0, 0, 2, true, &drawn) && drawn == 0);

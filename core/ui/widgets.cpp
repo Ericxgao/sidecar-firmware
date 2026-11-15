@@ -82,6 +82,14 @@ CORE_COLD void dotted_v(Canvas& c, int x, int y0, int y1) {
   for (int y = y0; y <= y1; y += 2) c.pixel(x, y);
 }
 
+CORE_COLD bool header_tag_on() { return g_tag[0] != 0; }
+CORE_COLD const char* fit_title(const char* full, const char* shorter, int npages, const char* right) {
+  int dots = npages > 1 ? (npages > 12 ? 12 : npages) : 0;
+  if (g_tag[0]) right = g_tag;
+  int room = kW - 2 - dots * 4 - 3 - (right ? (int)strlen(right) : 0) * kRSmall.advance - 2;
+  return (int)strlen(full) * kRSmall.advance <= room ? full : shorter;
+}
+
 CORE_COLD void cell_label(Canvas& c, int col, int row, const char* s, bool touched) {
   const int x = col * kCellW + kCellW / 2, y = row ? 48 : 26, e = row * 4 + col;
   if (!s || !*s) {

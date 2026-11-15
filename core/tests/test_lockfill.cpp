@@ -1010,7 +1010,7 @@ int main() {
             !strcmp(c.txt[ui::kSlotFree + 12].s, "G OFS") && !strcmp(c.txt[ui::kSlotFree + 13].s, "0") && !strcmp(c.txt[ui::kSlotFree + 14].s, "H SEED"));
       // the title, the summary line (FROM > TO), the key boxes: YES FILL | NO BACK, with FUNC YES CLEAR | NO UNDO
       CHECK(!strcmp(c.txt[ui::kSlotTitle].s, "FILL BD"));
-      CHECK(!strncmp(c.txt[ui::kSlotFree + 16].s, "", 0) && strstr(c.txt[ui::kSlotFree + 16].s, " > "));
+      CHECK(strstr(c.txt[ui::kSlotFree + 16].s, " > "));
       CHECK(!strcmp(c.txt[ui::kSlotFoot].s, "YES") && !strcmp(c.txt[ui::kSlotFoot + 1].s, "FILL") &&
             !strcmp(c.txt[ui::kSlotFoot + 2].s, "NO") && !strcmp(c.txt[ui::kSlotFoot + 3].s, "BACK"));
       scr_shot("fill_idle.png", c);

@@ -235,7 +235,7 @@ CORE_COLD void fill_draw(Canvas& c, int page, int npages, uint32_t ms) {
   int pat = -1;
   const uint8_t* rec = rytm_dump::record(&pat, nullptr);
   const ft::Def* d = def();
-  const bool turning = d && P.turn_e >= 0 && ms - P.turn_ms < (uint32_t)kTurnMs;
+  const bool turning = d && P.turn_e >= 0 && turn_live(ms, P.turn_ms, kTurnMs);
   if (!d) {
     sniprintf(t, sizeof t, "FILL %s", trk);
     header(c, t, page, npages, nullptr);

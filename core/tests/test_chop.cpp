@@ -1217,6 +1217,10 @@ static void test_pages() {
     }
     CHECK(!strcmp(c.txt[ui::kSlotFoot].s, "YES") && !strcmp(c.txt[ui::kSlotFoot + 1].s, "PLAY") && !strcmp(c.txt[ui::kSlotFoot + 2].s, "NO") &&
           !strcmp(c.txt[ui::kSlotFoot + 3].s, "BACK"));
+    {   // the longest title and right box side by side at 5 px a character (an unsaved map: the mark is in the right box)
+      CHECK(2 + (int)strlen("CHOP SLICE 3 B4") * 5 < ui::kW - 3 - (int)strlen("* 12.34S") * 5 - 3);
+      CHECK(!strstr(c.txt[ui::kSlotTitle].s, "*") && (int)strlen(c.txt[ui::kSlotTitle].s) <= 15);
+    }
     CHECK(!scr_has(c, "S4") && !strstr(c.txt[ui::kSlotFoot].s, " B1"));   // the old bottom bar's text is gone
     scr_shot("chop_edit_idle.png", c);
     pg.enc(3, 1, false);   // D: ZOOM

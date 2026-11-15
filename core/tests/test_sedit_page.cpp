@@ -302,7 +302,7 @@ static void t_func_yes_save() {
   tap(0x44);
   up(0x80);
   CHECK(shows("SAVE+USE") && shows("CANCEL"));
-  CHECK(shows("SAVE THE REGION  A: PICK") && shows("TRACK USES IT") && shows("NEW FILE") && shows("NOTHING SAVED"));
+  CHECK(shows("SAVE REGION  A: PICK") && shows("TRACK USES IT") && shows("NEW FILE") && shows("NOTHING SAVED"));
   CHECK(!shows("STRT") && !shows("ZOOM") && !shows("VIEW") && scr_items(g_c) < 64);   // under the box the page's own text is not put
   CHECK(!strcmp(g_c.txt[ui::kSlotFoot].s, "YES") && !strcmp(g_c.txt[ui::kSlotFoot + 1].s, "OK") && !strcmp(g_c.txt[ui::kSlotFoot + 3].s, "BACK"));
   png("sedit-save.png");
