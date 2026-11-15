@@ -154,6 +154,10 @@ build/test_scope_pi: test_scope_pi.cpp ../scope_pi.cpp ../scope_pi.h ../../ui/si
 	@mkdir -p build
 	$(CXX) -I$(CORE)/host $(CXXFLAGS) -Wno-unused-parameter -o $@ $< ../scope_pi.cpp
 # the storage layer (docs/STORAGE.md): the volumes' state machine and rules, the bench on a simulated drive and a temp folder
+# the first boot's grow of the SD image (sdgrow.cpp) on in-memory disks laid out by sdimg_fixture.h
+build/test_sdgrow: test_sdgrow.cpp ../sdgrow.cpp ../sdgrow.h sdimg_fixture.h check.h
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -o $@ $< ../sdgrow.cpp
 build/test_stor_vol: test_stor_vol.cpp ../stor_vol.cpp ../stor_vol.h ../stor_out.h check.h
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) -o $@ $< ../stor_vol.cpp
