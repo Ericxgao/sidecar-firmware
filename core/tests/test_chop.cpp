@@ -31,6 +31,7 @@
 #include "pool_util.h"
 #include "poly.h"
 #include "rui_png.h"
+#include "screens_util.h"
 #include "samp/sampler.h"
 #include "ui/extra.h"
 #include "ui/remote.h"
@@ -1125,6 +1126,7 @@ static int extra_index(const char* title) {
     if (!strcmp(ui::extra_page(k).title, title)) return k;
   return -1;
 }
+// (the editor is off the ring: no page dots, as on the Rytm: its pages are drawn directly, not through remote_render)
 static void test_pages() {
   const int vi = 0;
   std::string dir = rui_png_dir("RUI_OUT", "build/rui_chop");
@@ -1145,7 +1147,7 @@ static void test_pages() {
   const char* names[] = {"chop_edit.png", "chop_slice1.png", "chop_slice2.png", "chop_slice3.png"};
   for (int view = 0; view < 4; ++view) {
     ui::chop_page_set(view, 3, 1);
-    CHECK(ui::remote_render(6 + k, 0, nullptr, c));
+    ui::extra_page(k).draw(c, 0, 1, now_ms() | 1);
     ui::preview(c, fb);
     rui_png(dir, names[view], fb);
   }
@@ -1162,19 +1164,56 @@ static void test_pages() {
   {
     const ui::ExtraPage& pg = ui::extra_page(k);
     CHECK(pg.key(0x42) && pg.key_up(0x42) && ui::chop_page_all());
-    CHECK(ui::remote_render(6 + k, 0, nullptr, c));
+    ui::extra_page(k).draw(c, 0, 1, now_ms() | 1);
+    CHECK(!strncmp(c.txt[ui::kSlotRight].s, "ALL ", 4) && !(c.txt[ui::kSlotRight].flags & ui::kTextInvert) && c.get(120, 1) == false);   // a black box, clear text
+    CHECK(!scr_has(c, "ALL 9 SLICES  UP: ONE") && !strcmp(c.txt[ui::kSlotFoot + 1].s, "PLAY"));
     ui::preview(c, fb);
     rui_png(dir, "chop_slice1_all.png", fb);
     ui::chop_page_set(0, 3, 1);   // (L4: the EDIT view's header says ALL too)
-    CHECK(ui::remote_render(6 + k, 0, nullptr, c));
+    ui::extra_page(k).draw(c, 0, 1, now_ms() | 1);
     ui::preview(c, fb);
     rui_png(dir, "chop_edit_all.png", fb);
     CHECK(pg.key(0x42) && pg.key_up(0x42) && !ui::chop_page_all());
   }
   ui::chop_page_set(0, 3, 3);   // START zoom
-  CHECK(ui::remote_render(6 + k, 0, nullptr, c));
+  ui::extra_page(k).draw(c, 0, 1, now_ms() | 1);
   ui::preview(c, fb);
   rui_png(dir, "chop_zoom_start.png", fb);
+  {   // 0.5.0 screens (the UI system, AROUND): names above / under the wave, values beside it, the bank and the map's state in the
+      // title, the slice's length in the right box, key boxes; a turn names the knob on the title bar and in the bottom bar
+    const ui::ExtraPage& pg = ui::extra_page(k);
+    ui::chop_page_set(0, 3, 1);
+    pg.draw(c, 0, 1, now_ms() | 1);
+    CHECK(scr_items(c) < 64);
+    CHECK(!strncmp(c.txt[ui::kSlotTitle].s, "CHOP EDIT B1", 12) && strstr(c.txt[ui::kSlotRight].s, "S") && strchr(c.txt[ui::kSlotRight].s, '.'));
+    const char* nm[8] = {"SLC", "STRT", "END", "ZOOM", "GRID", "SENS", "LAT", "RSMP"};
+    for (int e = 0; e < 8; ++e) {
+      const ui::TextItem& n = c.txt[ui::kSlotLabels + e];
+      const ui::TextItem& v = c.txt[ui::kSlotCells + e];
+      CHECK(!strcmp(n.s, nm[e]) && n.x == (e & 3) * 32 + 16 && n.y == (e < 4 ? 10 : 49) && v.y == (e < 4 ? 16 : 43) && v.x == n.x && v.s[0]);
+    }
+    CHECK(!strcmp(c.txt[ui::kSlotFoot].s, "YES") && !strcmp(c.txt[ui::kSlotFoot + 1].s, "PLAY") && !strcmp(c.txt[ui::kSlotFoot + 2].s, "NO") &&
+          !strcmp(c.txt[ui::kSlotFoot + 3].s, "BACK"));
+    CHECK(!scr_has(c, "S4") && !strstr(c.txt[ui::kSlotFoot].s, " B1"));   // the old bottom bar's text is gone
+    scr_shot("chop_edit_idle.png", c);
+    pg.enc(3, 1, false);   // D: ZOOM
+    pg.draw(c, 0, 1, now_ms() | 1);
+    CHECK(!strcmp(c.txt[ui::kSlotTitle].s, "ZOOM") && !strcmp(c.txt[ui::kSlotFoot].s, "ZOOM") && !strcmp(c.txt[ui::kSlotFoot + 1].s, c.txt[ui::kSlotCells + 3].s));
+    CHECK((c.txt[ui::kSlotLabels + 3].flags & ui::kTextInvert) && !(c.txt[ui::kSlotLabels + 2].flags & ui::kTextInvert) && scr_items(c) < 64);
+    scr_shot("chop_edit_turning.png", c);
+    pg.enc(5, 1, false);   // F: the transient sensitivity, its whole name
+    pg.draw(c, 0, 1, now_ms() | 1);
+    CHECK(!strcmp(c.txt[ui::kSlotTitle].s, "TRANSIENT SENS"));
+    pg.draw(c, 0, 1, now_ms() + 5000);   // (timed out)
+    CHECK(!strncmp(c.txt[ui::kSlotTitle].s, "CHOP EDIT", 9) && !strcmp(c.txt[ui::kSlotFoot].s, "YES"));
+    ui::chop_page_set(1, 3, 1);   // SLICE 1: the fields' whole names while turning (no field is changed: the turn is checked on a view's E..H only)
+    pg.draw(c, 0, 1, now_ms() | 1);
+    CHECK(!strncmp(c.txt[ui::kSlotTitle].s, "CHOP SLICE 1 B1", 15) && !strcmp(c.txt[ui::kSlotLabels].s, "PTCH") && !strcmp(c.txt[ui::kSlotLabels + 4].s, "ATK"));
+    ui::chop_page_set(3, 3, 1);   // SLICE 3: POLY GATE, the other knobs have no name
+    pg.draw(c, 0, 1, now_ms() | 1);
+    CHECK(!strcmp(c.txt[ui::kSlotLabels].s, "POLY") && !strcmp(c.txt[ui::kSlotLabels + 1].s, "GATE") && !c.txt[ui::kSlotLabels + 2].s[0] && !c.txt[ui::kSlotCells + 5].s[0]);
+    ui::chop_page_set(0, 3, 1);
+  }
   // the keys: T5 selects (and auditions) slice 5 of bank 1, RIGHT the next, push B deletes, push D undoes
   ui::chop_page_set(0, 0, 1);
   CHECK(ui::extra_page(k).key(4) && ui::chop_page_sel() == 4);
@@ -1281,7 +1320,9 @@ static void test_pages() {
   CHECK(ui::extra_page(k).key(2));
   render(vi, 12000);
   CHECK(ui::extra_page(k).key(5));
-  CHECK(ui::remote_render(6 + k, 0, nullptr, c));
+  ui::extra_page(k).draw(c, 0, 1, now_ms() | 1);
+  CHECK(!strcmp(c.txt[ui::kSlotTitle].s, "LAZY: TAP PADS") && !strcmp(c.txt[ui::kSlotRight].s, "2 TAPS") && !strcmp(c.txt[ui::kSlotFoot + 1].s, "KEEP") &&
+        !strcmp(c.txt[ui::kSlotFoot + 3].s, "DROP") && scr_items(c) < 64);
   ui::preview(c, fb);
   rui_png(dir, "chop_lazy.png", fb);
   CHECK(ui::extra_page(k).key(0x44) && !chop::lazy_on(vi) && chop::slices(vi) == 2);
@@ -1289,7 +1330,7 @@ static void test_pages() {
   // the empty states
   chop::reset();
   for (int t = 0; t < kVoices; ++t) v[t].cp = false;
-  CHECK(ui::remote_render(6 + k, 0, nullptr, c));
+  ui::extra_page(k).draw(c, 0, 1, now_ms() | 1);
   ui::preview(c, fb);
   rui_png(dir, "chop_none.png", fb);
   ui::chop_page_reset();
