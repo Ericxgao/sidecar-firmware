@@ -23,6 +23,7 @@
 #include "fx/insert.h"
 #include "fx/send_fx.h"
 #include "machines.h"
+#include "md/md.h"
 #include "mod/rytm_param.h"
 #include "keys.h"
 #include "poly.h"
@@ -1651,6 +1652,61 @@ int main() {
     CHECK(seq::owns_track(5) && seq::edit_track(5, false)->step[0].n == 1);
     cmd("seq=track:6:off");
     engine_sysex(closed, sizeof closed);
+  }
+  // ---- LOCK SMPL on a poly track playing MD (0.5.0 spd-enc): the knob labels are voice_label's (MD's own P9..P16), not "-"
+  {
+    direct_state({2, 0, 0x7F});
+    while (seq::idle()) {}
+    const uint8_t o[] = {0xF0, 0x7D, 0x52, 0x54, 0x30, 1, 0x10, 1, 0, 0xF7};
+    engine_sysex(o, sizeof o);
+    seq::view_set(0, 0, -1, false);
+    seq::Track* bt = seq::edit_track(0, true);
+    for (seq::Step& x : bt->step) x.n = 0, x.nl = 0;
+    bt->length = 16;
+    seq::add_note(bt->step[2], {64, 100, 48, 0, 0});
+    report(kMd | 0, {0, 40, 64, 64, 64, 64, 64, 64, 64, 64, 0, 0, 0, 0, 0, 100});
+    const uint8_t toMd[] = {0xF0, 0x7D, 0x52, 0x54, 0x33, 1, 0, 1, 5, (uint8_t)(kMd | 0), 0xF7};   // track 0 (BD): MD
+    engine_sysex(toMd, sizeof toMd);
+    CHECK(remote_track_machine(0) == (kMd | 0) && md::label(0, 8));
+    key(2, true);
+    key(0x32, true), key(0x32, false);   // SMPL: P9..P16
+    for (int i = 0; i < 3; ++i) remote_tick((uint32_t)(9800 + 30 * i)), advance_ms(30);
+    int shownMd = 0, unusedMd = 0;
+    for (int e = 0; e < 8; ++e) {
+      const char* l = md::label(0, 8 + e);
+      if (l && l[0]) {
+        ++shownMd;
+        CHECK(shown(l));
+      } else {
+        ++unusedMd;
+      }
+    }
+    CHECK(seq::view().lock_page == seq::kLpSmpl && shownMd > 0);
+    {   // "-" only for the P9..P16 MD leaves unused
+      uint8_t t[36 * kTextSlots];
+      int n = sent_texts(t, kTextSlots), dash = 0;
+      for (int i = 0; i < n; ++i) dash += !strcmp((const char*)t + 36 * i + 4, "-");
+      CHECK(dash == unusedMd);
+    }
+    key(2, false);
+    advance_ms(100);
+    {   // a user machine (U1, vb 0x50): the manifest's label on P10 shown, P9 (no label) "-"
+      static bool (*saved)(int, int, char*, int);
+      saved = hooks.user_label;
+      hooks.user_label = [](int, int k, char* b, int cap) { return k == 9 ? (snprintf(b, (size_t)cap, "WARP"), true) : false; };
+      const uint8_t toU[] = {0xF0, 0x7D, 0x52, 0x54, 0x33, 1, 0, 1, 5, 0x50, 0xF7};
+      engine_sysex(toU, sizeof toU);
+      key(2, true);
+      key(0x32, true), key(0x32, false);
+      for (int i = 0; i < 3; ++i) remote_tick((uint32_t)(9900 + 30 * i)), advance_ms(30);
+      CHECK(shown("LOCK SMPL") && shown("WARP"));
+      key(2, false);
+      advance_ms(100);
+      hooks.user_label = saved;
+    }
+    const uint8_t toFm[] = {0xF0, 0x7D, 0x52, 0x54, 0x33, 1, 0, 1, 40, (uint8_t)(kFm | 0), 0xF7};   // and back to 6-OP FM
+    engine_sysex(toFm, sizeof toFm);
+    report(kFm | 0, {0, 64, 64, 127, 64, 64, 100, 127});
   }
   // ---- the lock pages: BD's SEQ page; T3 held + SRC: A..H lock P1..P8 of step 3; SMPL P9..P16, FX FX1 / FX2 P2..P5;
   // a push clears one, NO every lock of the held steps; the LEDs magenta; T3 let go: no toggle, the lock page ends
