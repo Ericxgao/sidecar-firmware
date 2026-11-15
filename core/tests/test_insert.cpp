@@ -1024,7 +1024,7 @@ int main() {
     ui::extra_page(k).enc(0, 2, false);
     CHECK(out::control.route[0] == out::kPost);
     ui::extra_page(k).enc(1, -10, false), ui::extra_page(k).enc(2, 20, false);
-    CHECK(out::param(0, 0) == 90 && out::control.pan[0] == 84);
+    CHECK(out::param(0, 0) == 90 && out::control.pan[0] == 64 + 20 - ui::kDetentCounts);   // (0.5.0: PAN leaves its centre past the detent)
     ui::extra_page(k).enc(4, 5, false);   // E DEC: only for DSP SAMPLE (none here): unchanged
     CHECK(out::param(0, 3) == 0);
     CHECK(ui::remote_render(6 + k, 0, nullptr, c));
@@ -1079,7 +1079,7 @@ int main() {
     CHECK(ui::extra_page(k).key(0x41));   // RIGHT: the EQ view
     ui::extra_page(k).enc(0, 40, false);
     ui::extra_page(k).enc(2, 30, false);
-    CHECK(ins::eq_param(0, 0) == 40 && ins::eq_param(0, 2) == 94);
+    CHECK(ins::eq_param(0, 0) == 40 && ins::eq_param(0, 2) == 94 - ui::kDetentCounts);   // (0.5.0: LOW leaves its flat 64 past the detent)
     ui::extra_page(k).enc(1, 10, true);   // FUNC: by 8
     CHECK(ins::eq_param(0, 1) == 80);
     CHECK(ui::remote_render(6 + k, 0, nullptr, c));

@@ -77,9 +77,23 @@ class PageView {
 };
 
 // The encoder's new value: one zone a step (delta's sign) on a kList cell's parameter (its zone's centre: pace it with
-// list_turn), else v + delta (x 8 with FUNC held), 0..127.
+// list_turn), else v + delta (x 8 with FUNC held), 0..127; a bipolar cell's knob (kKnobBi, kPan, an LFO's depth) holds at 64
+// (detent_step).
 int step_value(const Page& p, int param, int v, int delta, bool func);
 bool is_list(const Page& p, int param);   // a kList cell's parameter
+// 0.5.0 UI feel: the centre detent. A turn of a bipolar knob (a pan, an EQ gain, a tune, a depth: its neutral value 64, or
+// 0) that crosses or lands on the neutral stops there; the next turns leave it only once they have travelled
+// kDetentCounts counts further (a reversal gives the travel back), then move on by the rest.
+constexpr int kDetentCounts = 3;
+// FUNC + turn: a coarse step (1 / 16 of a 0..127 range; an octave of semitones on a tune)
+constexpr int kCoarseStep = 8, kOctaveStep = 12;
+// v moved by `step` counts (signed, unclamped result; the caller clamps) as encoder e (A..H, 8 DATA) with its detent at
+// `neutral`; key names the parameter (a page's cell, any address that is the parameter's alone: moving to another one
+// starts the detent over)
+int detent_step(int e, const void* key, int v, int step, int neutral, bool coarse = false);   // coarse (FUNC): leaves the centre whole
+void detent_scope(int scope);   // whose parameters the next detent_step calls are (the voice shown): another one starts it over
+void detent_reset();            // tests, remote_reset
+inline const void* detent_tag(int id) { return (const void*)(intptr_t)(id + 1); }   // a code page's parameter, by a number of its own
 // A list knob, the one rule for every list, enumerated value and switch on the Rytm's encoders (core/ui/README.md, "List
 // knobs"). delta is raw panel counts: the Rytm reports a knob's sum about every 67 ms, so size and timing of a report say
 // nothing about entries. list_turn: -1, 0 or +1, the entries to move for this report of encoder e (A..H, 8 DATA); call it
