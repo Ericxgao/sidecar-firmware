@@ -80,7 +80,7 @@ static const sc_page_key_t sc_rytm_mk2_pages[] = {
 #if SIDECAR_MORPH
 	{14, "MORPH", "MORPH", ""},	/* 0.5.0 (spec-050 2.6): needs the 0.5.0 flash's 0026 (UP + T14: rui.c forwards
 					   UP + T1..T13 today); until then the SIDECAR MENU's row */
-#endif	/* 0.5.0: the MORPH page is off (SIDECAR_MORPH 0): UP + T14, which the rc5b mod still forwards, finds no row and does nothing */
+#endif	/* 0.5.0: the MORPH page is off (SIDECAR_MORPH 0): UP + T14, which the rc5b mod still forwards, finds no row (remote.cpp shows a "MORPH: 0.5.1" popup) */
 };
 static const sc_combo_t sc_rytm_mk2_combos[] = {
 	{"pages", "UP+YES", "SIDECAR (YES: MENU)", "YES PAGES", "TRK+YES", 0},
