@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include <unistd.h>   // mkdtemp
 
@@ -129,6 +130,70 @@ static void test_detent_lfo() {
   CHECK(lfo::get(0).depth == 1);
 }
 
+// ---- 3 and 4: the SIDECAR MENU (a list that scrolls with UP / DOWN: its mask claims them)
+static void open_menu() {
+  remote_reset(), menu_reset();
+  from_rytm(0x30, 0, 1, 0);
+  tick(30);   // (a hello would be a new link after 600 ms: the page is older than that)
+  tap(kYes);
+  CHECK(is("MENU"));
+}
+// the row the cursor is on: the left text drawn inverted
+static std::string cursor() {
+  Canvas c;
+  kMenuPage.draw(c, 0, 1, now_ms() | 1);
+  for (const TextItem& t : c.txt)
+    if (t.s[0] && (t.flags & kTextInvert) && (t.flags & 3) == kAlignLeft) return t.s;
+  return "<none>";
+}
+// the cursor after k DOWN taps from the top, k = 0..n-1 (the menu again after)
+static std::vector<std::string> rows(int n) {
+  open_menu();
+  std::vector<std::string> r;
+  for (int k = 0; k < n; ++k) r.push_back(cursor()), tap(kDown);
+  open_menu();
+  return r;
+}
+
+static void test_up_scrolls() {
+  const std::vector<std::string> r = rows(6);
+  for (int k = 0; k < 3; ++k) tap(kDown);
+  CHECK(cursor() == r[3]);
+  key(kUp, true);   // UP held on a page that scrolls with it: its key moved the list ...
+  CHECK(cursor() == r[2]);
+  from_rytm(0x49, 5, 1, 0), tick();   // ... and the Rytm's "UP held alone": no map over it
+  CHECK(is("MENU") && !keys_map_on());
+  key(kUp, false), from_rytm(0x49, 5, 0, 0), tick();
+  CHECK(is("MENU") && cursor() == r[2]);
+  // a page that leaves UP to the Rytm (a voice page, its mask names it for DOWN's page only): the map, as before
+  plaits_page(63);
+  from_rytm(0x49, 5, 1, 0), tick();
+  CHECK(is("KEYS") && keys_map_on());
+  from_rytm(0x49, 5, 0, 0), tick();
+  CHECK(!is("KEYS") && remote_stats().page == 1);
+  // INSERT stands alone and takes no UP / DOWN: the map
+  remote_show_page("INSERT"), tick();
+  CHECK(is("INSERT"));
+  from_rytm(0x49, 5, 1, 0), tick();
+  CHECK(is("KEYS"));
+  from_rytm(0x49, 5, 0, 0), tick();
+  // USER SLOTS is a ring page whose rows UP / DOWN move: no map; SCOPE, a ring
+  // page that leaves UP alone: the map
+  static const RemoteSlots slots = {[]() { return 0; }, [](int, char*, int, const char**) { return false; },
+                                    [](int, char*, int) { return ""; }, [](const char*, char*, int) { return false; },
+                                    nullptr, nullptr, nullptr};
+  remote_slots(&slots);
+  for (const char* title : {"USER SLOTS", "SCOPE"}) {
+    remote_show_page(title), tick();
+    CHECK(is(title));
+    from_rytm(0x49, 5, 1, 0), tick();
+    CHECK(is(title) == (strcmp(title, "SCOPE") != 0));
+    from_rytm(0x49, 5, 0, 0), tick();
+    CHECK(is(title));
+  }
+  remote_slots(nullptr);
+}
+
 int main() {
   char tmpl[] = "/tmp/core_uifeel_XXXXXX";
   CHECK(mkdtemp(tmpl));
@@ -137,7 +202,7 @@ int main() {
   hooks.to_rytm = out;
   at(g_us);
   CHECK(engine_begin());
-  struct { const char* name; void (*fn)(); } tests[] = {{"detent", test_detent}, {"detent_lfo", test_detent_lfo}, {"func", test_func_coarse}};
+  struct { const char* name; void (*fn)(); } tests[] = {{"detent", test_detent}, {"detent_lfo", test_detent_lfo}, {"func", test_func_coarse}, {"up_scrolls", test_up_scrolls}};
   for (auto& t : tests) printf("-- %s\n", t.name), fflush(stdout), t.fn();
   remote_reset();
   system((std::string("rm -rf '") + tmpl + "'").c_str());

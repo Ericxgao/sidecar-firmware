@@ -863,6 +863,20 @@ CORE_COLD bool seq_data() { return false; }
 CORE_COLD bool seq_yes() { return true; }
 CORE_COLD bool seq_updown() { return true; }
 #endif
+// Whether page x (null: a voice page or SIDECAR) names UP / DOWN in the catch mask (updown044: a ring page always, a page
+// alone only when it sets `updown`, the SEQ page per moment). send_mask's `updown`, and 0.5.0's "UP held on a page that
+// scrolls with it".
+CORE_COLD bool claims_updown(const ExtraPage* x) {
+  if (x && !strcmp(x->title, "SEQ")) return seq_updown();
+  return !standalone(x) || x->updown;
+}
+// 0.5.0 UI feel: the page really moves with UP / DOWN (its rows, its banks), so UP held on it is a scroll and the combo map
+// (49 1 5 1) stays closed. claims_updown, less the ring pages that leave UP alone (a voice page, SCOPE: DOWN is their next
+// page; they do not set `updown`) and the pages that use UP as their modifier (key_up: CHOP's ALL, FILL's UP + RIGHT).
+CORE_COLD bool scrolls_updown(const ExtraPage* x) {
+  if (!x || !claims_updown(x)) return false;
+  return !strcmp(x->title, "SEQ") || (x->updown && !x->key_up);
+}
 // U1 NOTE EDIT: data - the SEQ page on a poly track also takes DATA (LEVEL, encoder 8) and its push (0x78): rytm-mods
 // 0026 forwards any encoder 0..15 the mask names as 32 <e> (design.md 1022, "LEVEL = 8" [measured]), no mod change
 // ux1027: yes false - the SEQ page leaves YES to the Rytm (seq::yes_wanted: its YES combos, the quick saves); rytm-mods
@@ -1052,7 +1066,7 @@ CORE_COLD void frame(uint32_t ms) {
   bool sq = x && !strcmp(x->title, "SEQ");
   // 0.5.0: MORPH's FUNC + YES (EDIT) needs FUNC (both sides'); SAMPLE EDIT's FUNC + YES (save) too
   bool fn = sq || (x && (!strcmp(x->title, "MORPH") || !strcmp(x->title, "SAMPLE EDIT") || !strcmp(x->title, "FILL")));   // FILL: FUNC + YES / NO
-  bool updown = sq ? seq_updown() : !standalone(x) || x->updown;   // updown044: a page alone only when it uses them
+  bool updown = claims_updown(x);   // updown044: a page alone only when it uses them
   if (!s.legacy) send_mask(p, x ? extra_encs(*x) : 0, page_trigs(x), fn, sq && seq_data(),
                             !sq || seq_yes(), updown);   // before the frame: the keys and knobs the page shows are its own from now on
   update_leds(x);
@@ -1836,6 +1850,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         return;
       }
       if (b[0] == 5 && n >= 2) {   // rui1050: UP held alone over an open page (1): the map over it; let go (0): that page again
+        if (b[1] && s.open && !s.map_over && scrolls_updown(extra_of(s.voice))) return;   // 0.5.0: UP scrolls this page: no map
         if (b[1] && s.open && !s.map_over) {   // (a repeated 1: the page under it kept)
           s.map_back = s.voice, s.map_over = true;
           bool sc = s.shortcut;
