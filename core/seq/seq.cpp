@@ -4632,6 +4632,7 @@ View view() {
   w.prompt_n = ui.prompt_n, w.prompt_locks = ui.prompt_locks;
   w.prompt_undo = ne_hooks && ne_hooks->save;
   w.prompt_why = ui.prompt == kPromptExplain ? can_seq(ui.prompt_track) : 0;
+  w.can_make = can_seq(r) == 1;
   w.prompt_sel = ui.prompt_sel;
   w.off_hint = ui.off_hint_ms && (int32_t)(now_ms() - ui.off_hint_ms) < 3000;
   w.lock_page = ui.held ? ui.lockpg : -1;
@@ -4707,7 +4708,8 @@ CORE_COLD void view_request(int r) {
 }
 CORE_COLD void selected_track(int t) {
   if (!cur) reset();
-  // (a make or explain prompt follows too, "Follow, never close"; the menu, restore and off questions wait for their answer)
+  // (a make or explain prompt up goes with the selection, "Follow, never close"; the menu, restore and off questions wait
+  // for their answer)
   if (t < 0 || t >= kRytmTracks || t == ui.track) return;
   if (ui.prompt && !(seq_shown() && (ui.prompt == kPromptMake || ui.prompt == kPromptExplain))) return;
   ui.held = 0, ui.page_held = false, ui.lockpg = -1, ui.touched = -1, ui.cond_e = -1, ui.push_down = 0, ui.func = false, ui.msg_ms = 0;
@@ -4716,15 +4718,17 @@ CORE_COLD void selected_track(int t) {
     return;
   }
   // 0.5.0 (a selection on an open page; owner: whoever opened it, TRK + TRIG, seq mode, the ring, UP + T2; "Follow, never
-  // close"): the SEQ page follows with that track's make prompt, or its explain prompt on a track of the Rytm's own
-  // synth, as TRK + TRIG would (NO on a prompt TRK + TRIG opened closes it as before)
+  // close"): the SEQ page follows to that track and shows it as it is, a track that is no poly track in its plain state
+  // (NOT SEQUENCED, the footer how to make one or why not). Owner 2026-11-15: "I just want it to switch to that track, no
+  // dialog about making it a poly track": a selection never asks; making it one stays B turned up (or TRK + TRIG's
+  // own prompt, an explicit open)
   if (!seq_shown()) return;
   if (seqmode) {   // seq mode's page: the Rytm leaves seq mode on a track that is no seq track (its 08 0 follows, then
-    if (ui.ne) ne_leave();   // closing nothing); the page stays with the prompt, closed by NO as TRK + TRIG's is
+    if (ui.ne) ne_leave();   // closing nothing); the page stays on that track, closed by NO as TRK + TRIG's is
     seqmode = false;
     if (we_opened) we_opened = false, ui.view_opened = true;
   }
-  ui.track = t, ui.page = 0, ui.prompt = can_seq(t) == 1 ? kPromptMake : kPromptExplain, ui.prompt_track = t;
+  ui.track = t, ui.page = 0, ui.prompt = 0;
 }
 CORE_COLD void page_closed() {
   if (!cur) reset();
