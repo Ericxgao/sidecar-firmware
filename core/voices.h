@@ -170,11 +170,13 @@ enum { kMFm, kMJuno, kMDsps, kMDaisy, kMMd, kMPlaits, kMUser, kMachines };
 // -12 dBFS (core/main_out.h), so most engines were clipped by up to 10 dB. Measured at the defaults (the voice row
 // before this gain): DAISYSP STRING -4.4 dBFS (the loudest; -2.7 at DMP 0), PLAITS MODAL -5.2, MD -5.4, a 0 dBFS
 // sample on DSP SAMPLE / SAMPLER at LEV 100 -5.5, PLAITS CHORDS -7.7, DAISYSP MODAL -6.7, JUNO -8.0, 6-OP FM -11.0,
-// WAVETABLE -18.8. 0.25 (-12.0 dB) puts the loudest at -16.4 dBFS, a little under the limit's knee (-15.1 dBFS); the
-// engines' 0.7 target lands on the knee itself, and the engines keep their levels against each other. Hotter than the
-// defaults (STRING at DMP 0: -14.7, LEV 127, PLAITS VOL 127) a voice enters the soft knee, never a hard clip. The rows
-// are requantised (Q15, rounded, no dither): a quiet engine keeps 2 bits fewer above the int16 floor.
-constexpr float kVoiceGain = 0.25f;
+// WAVETABLE -18.8. 0.35 (-9.1 dB; the owner's choice 2026-11-15, over the 0.25 that would have kept every default
+// under the knee) puts the loudest at -13.5 dBFS: inside the limit's soft knee (linear to -15.1 dBFS, the ceiling
+// -12.0 dBFS: core/main_out.h), under the ceiling, where the knee takes off at most 0.6 dB; PLAITS MODAL (-14.3) is in
+// the knee too. The other engines stay under it and keep their levels against each other. Hotter than the defaults (STRING at DMP 0: -11.8, LEV 127,
+// PLAITS VOL 127) the knee rounds the peaks toward -12 dBFS, never a hard clip. The rows are requantised (Q15,
+// rounded, no dither): a quiet engine keeps 1.5 bits fewer above the int16 floor.
+constexpr float kVoiceGain = 0.35f;
 uint32_t render_voices(int16_t (*ring)[kVoices], int ring_len, int w, int v0, int v1, uint64_t* mach,
                        int16_t (*ring_r)[kVoices] = nullptr, uint8_t* st = nullptr);
 // DSP SAMPLE's DEC on PRE / POST (core/fx/out.h): its trig / note-off counters (the control core bumps, the render

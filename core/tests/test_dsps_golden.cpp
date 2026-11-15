@@ -3,9 +3,9 @@
 // and a stereo file on OUT TRK and PRE, each from the card (no sample RAM: the Teensy's path) and from the sample RAM
 // (the Pi's). Voice 0's rows (L, and R on PRE) are hashed (FNV-1a 64) and compared with
 // tests/golden/dsps/v2/render.txt. v1/render.txt is what the host before SAMPLER (f9330b8^, the 0.4.x engine) wrote with
-// DSPS_GOLDEN_WRITE=1. v2 is v1's rows scaled as render_voices' kVoiceGain (voices.h, 0.25: Q15 8192, rounded) scales
+// DSPS_GOLDEN_WRITE=1. v2 is v1's rows scaled as render_voices' kVoiceGain (voices.h, 0.35: Q15 11469, rounded) scales
 // them: written by this engine built with kVoiceGain 1, which matched v1 (DSPS_GOLDEN=tests/golden/dsps/v1/render.txt),
-// with DSPS_GOLDEN_WRITE=1 DSPS_GOLDEN_GAIN_Q15=8192. The same source builds against both hosts: it uses no 0.5.0
+// with DSPS_GOLDEN_WRITE=1 DSPS_GOLDEN_GAIN_Q15=11469. The same source builds against both hosts: it uses no 0.5.0
 // name and sends no sound tag.
 #include <sys/wait.h>
 #include <unistd.h>

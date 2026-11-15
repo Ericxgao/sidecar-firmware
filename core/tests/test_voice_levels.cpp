@@ -1,7 +1,7 @@
 // core/tests/test_voice_levels.cpp - the voices' levels: LEV 0 is silence on DAISYSP and PLAITS (no 0.05 floor), PLAITS'
 // LEV and velocity scale its output (an output gain: Plaits' own decay envelope stays), and every engine at its default
-// knobs (64, LEV 100), full velocity, peaks under the output stage's knee (core::MainOut, -12 dBFS ceiling) once
-// kVoiceGain (voices.h) is applied.
+// knobs (64, LEV 100), full velocity, peaks under the output stage's -12 dBFS ceiling (core::MainOut) once kVoiceGain
+// (voices.h) is applied, the knee taking off less than 1 dB from the loudest.
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -69,14 +69,18 @@ int main() {
     CHECK(std::fabs(db(v20, v127) - 20 * std::log10(20.0 / 127)) < 1.0);
     CHECK(z < 1);
   }
-  // every engine, default knobs, vel 127: the voice row's peak under the knee (kKnee x kLimit = -15.1 dBFS), so no
-  // engine reaches the ceiling's soft limiting at its defaults. The loudest measured: DAISYSP STRING (-16.4 dBFS)
+  // every engine, default knobs, vel 127: the voice row's peak under the ceiling (kLimit, -12 dBFS; before kVoiceGain
+  // they reached -4.4 dBFS and the old clamp clipped them), and the soft knee (from kKnee x kLimit, -15.1 dBFS) takes
+  // less than 1 dB off any of them. With kVoiceGain 0.35 DAISYSP STRING (-13.5 dBFS) and PLAITS MODAL (-14.3) are in
+  // the knee, the rest under it (sample-exact).
   {
-    const int knee = (int)(MainOut::kKnee * MainOut::kLimit * 32768.0f);
-    int worst = 0;
+    const int knee = (int)(MainOut::kKnee * MainOut::kLimit * 32768.0f), ceil = (int)(MainOut::kLimit * 32768.0f);
+    int worst = 0, in_knee = 0;
     auto at = [&](int vb, std::vector<float> p, int blocks) {
       int pk = peak_of(vb, 127, p, blocks);
-      CHECK(pk < knee);
+      float x = pk / 32768.0f;
+      CHECK(pk < ceil && MainOut::Limit(x) > 0.891f * x);   // under -12 dBFS; the knee's cut under 1 dB
+      in_knee += pk > knee;
       worst = pk > worst ? pk : worst;
     };
     for (int z = 0; z < kPlaitsEngs; ++z)
@@ -85,7 +89,9 @@ int main() {
     for (int pat = 0; pat < 128; pat += 16) at(kJuno, {(float)pat, 64, 64, 64, 64, 64, 64, 100, 64, 64, 64, 64, 64, 64, 64, 64}, kSec / 2);
     for (int pat = 0; pat < 32; pat += 4) at(kFm, {(float)pat, 64, 64, 64, 64, 64, 64, 100, 64, 64, 64, 64, 64, 64, 64, 64}, kSec / 2);
     for (int e = 0; e < 128; e += 16) at(kMd, {(float)e, 64, 64, 64, 64, 64, 64, 100, 64, 64, 64, 64, 64, 64, 64, 64}, kSec / 2);
-    printf("loudest engine at its defaults: %d (%.1f dBFS), the knee %d\n", worst, 20 * std::log10(worst / 32768.0), knee);
+    printf("loudest engine at its defaults: %d (%.1f dBFS), the knee %d, the ceiling %d; %d in the knee\n", worst,
+           20 * std::log10(worst / 32768.0), knee, ceil, in_knee);
+    CHECK(in_knee <= 2);   // (STRING and MODAL: a hotter default would show here)
   }
   printf("test_voice_levels: PASS\n");
   return 0;
