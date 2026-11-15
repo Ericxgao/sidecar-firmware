@@ -208,14 +208,14 @@ CORE_COLD void start(int vi, int j, int m, const Decl& d, int note, int vel, con
       I.target = note + roundf(x.p[6] - 64) + (x.p[9] - 64) / 64.0f + semis;
       if (x.p[14] <= 0 || fresh) I.note = I.target;
       float sens = x.p[13] / 127.0f, l = (1 - sens + sens * vf) * x.p[7] / 127.0f;
-      I.level = l < 0.05f ? 0.05f : (l > 1 ? 1 : l);
+      I.level = l < 0 ? 0 : (l > 1 ? 1 : l);   // LEV 0: silence (no floor)
       I.trig = true, I.used = true;
       break;
     }
     case kMDaisy: {   // DAISYSP's: TUN semitones
       I.note = I.target = note + roundf(x.p[6] - 64) + semis;
       float l = vf * x.p[7] / 127.0f;
-      I.level = l < 0.05f ? 0.05f : (l > 1 ? 1 : l);
+      I.level = l < 0 ? 0 : (l > 1 ? 1 : l);   // LEV 0: silence (no floor)
       I.trig = true;
       break;
     }

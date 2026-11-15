@@ -1096,7 +1096,7 @@ static CORE_COLD void play_mono(int vi, int note, int vel) {
     // TUN semitones; P9..P16 are the sound's own sample page
     x.note = x.target = note + roundf(x.p[6] - 64);
     float l = (vel < 1 ? 1 : vel) / 127.0f * x.p[7] / 127.0f;
-    x.level = l < 0.05f ? 0.05f : (l > 1 ? 1 : l);
+    x.level = l < 0 ? 0 : (l > 1 ? 1 : l);   // LEV 0: silence (no floor)
     x.trig = true;
     x.live = true;
     if (x.grain && !psram) {   // GRAIN plays from the sample RAM only: silent, and said (the page names it too)
@@ -1121,7 +1121,7 @@ static CORE_COLD void play_mono(int vi, int note, int vel) {
     if (x.p[14] <= 0) x.note = x.target;
     float sens = x.p[13] / 127.0f;
     float l = (1 - sens + sens * (vel < 1 ? 1 : vel) / 127.0f) * x.p[7] / 127.0f;
-    x.level = l < 0.05f ? 0.05f : (l > 1 ? 1 : l);
+    x.level = l < 0 ? 0 : (l > 1 ? 1 : l);   // LEV 0: silence (no floor)
     x.trig = true;
     x.live = true;
     log(CORE_STR("trig voice %d note %d engine %d"), vi, (int)x.note, x.patch.engine);
