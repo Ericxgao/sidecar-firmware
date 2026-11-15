@@ -3921,6 +3921,20 @@ CORE_COLD bool ui_key(int code, bool down, bool shown) {
   return false;
 }
 
+// The size of the small list under encoder e on the track pages (ui::list_turn: a touch after a rest changes none of
+// them), 0 for the rest (values, long lists, the held trigs' pages: as before)
+CORE_COLD int enc_list_n(int e, bool func, bool shown) {
+  if (!shown || ui.held || ui.ne) return 0;
+  switch (ui.tv) {
+    case kTvNotes: return e == 1 ? 2 : 0;                                // the track on / off
+    case kTvDefaults: return e == 4 ? kDirs : e == 5 ? (func ? kSpeeds : 7) : 0;   // DIR, SPD (FUNC: all ten)
+    case kTvScale: return e == 2 ? kQnts : 0;                            // QNT (KEY 12, SCL: as before)
+    case kTvRandom:                                                      // RNG, WGHT, MODE, SQNT, SAFF
+      return e == 1 ? 4 : e == 2 ? kWeights : e == 3 ? kRndModes : e == 5 ? kSqs : e == 6 ? kAffs : 0;
+    default: return 0;
+  }
+}
+
 CORE_COLD bool ui_enc(int e, int delta, bool func, bool shown) {
   if (!cur) reset();   // (before engine_begin: the tests that skip it)
   // U1 NOTE EDIT: DATA (encoder 8; the page catches it on a poly track only, data_wanted) walks the highlight
@@ -3935,7 +3949,8 @@ CORE_COLD bool ui_enc(int e, int delta, bool func, bool shown) {
   ui.touched = e;
   if (ui.prompt && shown) return true;   // seq-ux: nothing under a prompt
   // the lists, switches and small counts below (ui::list_turn, once a report; the long ones: the conditions); the rest values
-  const int l = ui.held && (e == ui.cond_e || (ui.sv == kSvTrig && e == 4)) ? ui::list_turn_long(e, delta) : ui::list_turn(e, delta);
+  const int l = ui.held && (e == ui.cond_e || (ui.sv == kSvTrig && e == 4)) ? ui::list_turn_long(e, delta)
+                                                                            : ui::list_turn(e, delta, enc_list_n(e, func, shown));
   if (ui.held && ui.lockpg >= 0) {      // seq-ux: the lock page: the held steps' locks (rui1050: a knob on COND, its condition)
     if (e == ui.cond_e && lock_param_of(ui.lockpg, e) >= 0) {
       if (l) lcond_turn(lock_param_of(ui.lockpg, e), l, func);
