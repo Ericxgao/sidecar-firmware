@@ -191,9 +191,9 @@ static void test_lfo() {
   rest(), spin(kLfoPage, 1, 4, 2); CHECK(lfo::target_pos(lfo::get(0).target) == 3 && lfo::get(0).target == lfo::kTVoice + 7);   // RS (unknown: the pair's owner): V8
   rest(), spin(kLfoPage, 1, 20, 2); CHECK(lfo::target_pos(lfo::get(0).target) == 3 + 4 + 4 && lfo::get(0).target == lfo::target_from_name("I1"));   // past the 8 voices, FX1 FX2: I1 (no Rytm track entries since the owner's test)
   // DEPTH and RATE (free) stay continuous
-  s = lfo::get(0), s.depth = 0, s.rate = 64, lfo::set(0, s);
-  kLfoPage.enc(3, 5, false); CHECK(lfo::get(0).depth == 5);
-  kLfoPage.enc(3, 5, true); CHECK(lfo::get(0).depth == 45);
+  s = lfo::get(0), s.depth = 10, s.rate = 64, lfo::set(0, s);   // (away from 0: its centre holds, test_uifeel)
+  kLfoPage.enc(3, 5, false); CHECK(lfo::get(0).depth == 15);
+  kLfoPage.enc(3, 5, true); CHECK(lfo::get(0).depth == 55);
   kLfoPage.enc(5, 3, false); CHECK(lfo::get(0).rate == 67);
   // the design view (YES): step, shape, preset. A report the gap holds back leaves the design alone
   kLfoPage.key(0x44);

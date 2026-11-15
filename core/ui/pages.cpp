@@ -139,6 +139,34 @@ CORE_COLD bool is_list(const Page& p, int param) {
   return false;
 }
 
+namespace {
+struct Detent {
+  const void* key = nullptr;   // the parameter holding the centre (null: none)
+  int acc = 0;                 // the counts pushed into the detent since it caught, signed as the turns
+};
+Detent detents[9];   // A..H, DATA
+}  // namespace
+
+CORE_COLD int detent_step(int e, const void* key, int v, int step, int neutral) {
+  Detent& d = detents[e < 0 || e > 8 ? 8 : e];
+  if (!step) return v;
+  if (v == neutral) {   // held on the centre (landed there, or found there): the turns push into the detent
+    if (d.key != key) d.key = key, d.acc = 0;
+    d.acc += step;
+    if (d.acc >= -kDetentCounts && d.acc <= kDetentCounts) return neutral;
+    const int out = d.acc > 0 ? neutral + d.acc - kDetentCounts : neutral + d.acc + kDetentCounts;
+    d.key = nullptr, d.acc = 0;
+    return out;
+  }
+  const int nv = v + step;
+  if ((v < neutral && nv >= neutral) || (v > neutral && nv <= neutral)) {   // crosses or lands: stops
+    d.key = key, d.acc = 0;
+    return neutral;
+  }
+  if (d.key == key) d.key = nullptr;
+  return nv;
+}
+
 CORE_COLD int step_value(const Page& p, int param, int v, int delta, bool func) {
   for (int i = 0; i < p.ncells; ++i) {
     const Cell& c = p.cells[i];
@@ -148,7 +176,19 @@ CORE_COLD int step_value(const Page& p, int param, int v, int delta, bool func) 
     z = z < 0 ? 0 : z >= n ? n - 1 : z;
     return (z * 128 + 64) / n;   // the zone's centre: eng_zone() of it is z
   }
-  v += delta * (func ? 8 : 1);
+  const Cell* centred = nullptr;   // a bipolar cell: 64 is its neutral value
+  for (int i = 0; i < p.ncells; ++i) {
+    const Cell& c = p.cells[i];
+    if (((c.kind == kKnobBi || c.kind == kPan) && c.in[0] == param) || (c.kind == kLfo && c.in[1] == param)) centred = &c;
+  }
+  int e = 8;
+  for (int i = 0; i < 8; ++i)
+    if (p.enc[i] != kNone && (p.enc[i] & 15) == param) {
+      e = i;
+      break;
+    }
+  const int step = delta * (func ? 8 : 1);
+  v = centred ? detent_step(e, centred, v, step, 64) : v + step;
   return v < 0 ? 0 : v > 127 ? 127 : v;
 }
 
