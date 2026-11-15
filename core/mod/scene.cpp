@@ -7,6 +7,7 @@
 #include "fmt/fmt.h"
 #include "mod/mod.h"
 #include "platform.h"
+#include "sidecar_features.h"
 #include "pool/pool.h"
 #include "project_key.h"
 #include "ui/extra.h"
@@ -172,6 +173,7 @@ CORE_COLD uint32_t to_text() {
 CORE_COLD const State& state() { return g_st; }
 
 CORE_COLD bool lock(int n, mod::Tid t, uint16_t v) {
+  if (!SIDECAR_MORPH) return false;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   if (!ok_scene(n) || !mod::valid(t) || v > kFaderMax) return false;
   Scene& s = g_st.s[n];
   int i = find_lock(s, t);
@@ -186,6 +188,7 @@ CORE_COLD bool lock(int n, mod::Tid t, uint16_t v) {
 }
 
 CORE_COLD bool unlock(int n, mod::Tid t) {
+  if (!SIDECAR_MORPH) return false;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   if (!ok_scene(n)) return false;
   Scene& s = g_st.s[n];
   int i = find_lock(s, t);
@@ -198,6 +201,7 @@ CORE_COLD bool unlock(int n, mod::Tid t) {
 }
 
 CORE_COLD void clear(int n) {
+  if (!SIDECAR_MORPH) return;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   if (!ok_scene(n)) return;
   g_st.s[n].n = 0;
   g_stale = true;
@@ -205,6 +209,7 @@ CORE_COLD void clear(int n) {
 }
 
 CORE_COLD void copy(int from, int to) {
+  if (!SIDECAR_MORPH) return;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   if (!ok_scene(from) || !ok_scene(to) || from == to) return;
   g_st.s[to] = g_st.s[from];
   g_stale = true;
@@ -212,6 +217,7 @@ CORE_COLD void copy(int from, int to) {
 }
 
 CORE_COLD void set_ab(int a, int b) {
+  if (!SIDECAR_MORPH) return;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   int8_t na = (int8_t)(ok_scene(a) ? a : -1), nb = (int8_t)(ok_scene(b) ? b : -1);
   if (na == g_st.a && nb == g_st.b) return;
   g_st.a = na, g_st.b = nb;
@@ -220,6 +226,7 @@ CORE_COLD void set_ab(int a, int b) {
 }
 
 CORE_COLD void set_sel(int n) {
+  if (!SIDECAR_MORPH) return;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   if (!ok_scene(n) || n == g_st.sel) return;
   g_st.sel = (int8_t)n;
   changed();
@@ -227,6 +234,7 @@ CORE_COLD void set_sel(int n) {
 
 namespace {
 CORE_COLD void move_fader(uint16_t v, int source, uint32_t smooth_ms) {   // whichever moved last wins
+  if (!SIDECAR_MORPH) return;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   if (v > kFaderMax) v = kFaderMax;
   if (v == g_st.fader) return;
   g_from = g_played, g_set_ms = now_ms(), g_smooth_ms = smooth_ms;
@@ -242,6 +250,7 @@ CORE_COLD uint16_t fader_played() { return (uint16_t)g_played; }
 CORE_COLD int fader_source() { return g_src; }
 
 CORE_COLD void qperf(int pos, uint16_t mask, uint8_t flags) {
+  if (!SIDECAR_MORPH) return;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   g_qp_mask = (uint16_t)(mask & 0xFFF);
   if (!(flags & kQpMoved) || pos < 0 || pos > 255) return;   // the hello's report before the knob ever sent: no position
   if (g_qp_pos < 0) {   // the first report since the link came up: a baseline only, the knob takes on a change (M2)
@@ -264,6 +273,7 @@ CORE_COLD void rytm_scene_seen(int n) { g_rscn = n >= 0 && n <= kScenes ? n : 0;
 CORE_COLD int rytm_scene() { return g_rscn; }
 
 CORE_COLD void tick(uint32_t ms) {
+  if (!SIDECAR_MORPH) return;   // 0.5.0: the morph is off (sidecar_features.h): no edits, the data stays as loaded
   g_now_ms = ms;
   uint32_t el = ms - g_set_ms;
   int to = g_st.fader;
@@ -402,6 +412,7 @@ CORE_COLD bool command(const char* p, char* o, int cap) {
   if (cap <= 0) return true;
   o[0] = 0;
   if (!p[5]) return state_line(o, cap), true;
+  if (!SIDECAR_MORPH) return sniprintf(o, cap, CORE_STR("scene: not in this version (0.5.1)")), true;   // (the state line above is read only)
   const char* q = p + 6;
   char k[8], a[8], b[12], c[12];
   bool ok = field(&q, k, sizeof k);

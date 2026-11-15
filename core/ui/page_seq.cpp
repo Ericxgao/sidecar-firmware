@@ -589,7 +589,7 @@ CORE_COLD void kpage_fill(KPage& k, const seq::View& w, const seq::Step* hs) {
   steps_text(t->dlen, lb, sizeof lb), sniprintf(k.v[2], 12, "%s", lb), k.kv[2] = t->dlen * 127 / (16 * seq::kSub);
   sniprintf(k.v[3], 12, CORE_STR("%d%%"), w.swing), k.kv[3] = (w.swing - 50) * 127 / 30;
   sniprintf(k.v[4], 12, "%s", seq::dir_name(t->dir)), k.kv[4] = k127(t->dir, 0, seq::kDirs - 1);
-  sniprintf(k.v[5], 12, "%s", seq::speed_name(t->speed)), k.kv[5] = k127(t->speed, 0, seq::kSpeeds - 1);
+  sniprintf(k.v[5], 12, "%s", seq::speed_name(t->speed)), k.kv[5] = k127(seq::speed_pos(t->speed), 0, seq::kSpeeds - 1);   // (by the knob's order, not the id)
   if (t->length) sniprintf(k.v[6], 12, CORE_STR("%d"), w.length);
   else sniprintf(k.v[6], 12, CORE_STR("AUTO %d"), w.length);
   k.kv[6] = k127(t->length, 0, seq::kMaxSteps);

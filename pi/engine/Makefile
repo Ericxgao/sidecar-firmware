@@ -107,7 +107,7 @@ CORE_SRC += $(CORE)/msamp/cardq.cpp $(wildcard $(CORE)/samp/*.cpp)   # the card 
 RMPSRC := ../../teensy/libraries/RytmPlugins/src
 RMP_SRC := rmp_loader.cpp rmp_manifest.cpp rmp_meta.cpp rmp_proto.cpp rmp_resolve.cpp rmp_slots.cpp rmp_presets.cpp rmp_pool.cpp
 PORT_SRC := neon_bench.cpp output.cpp a4_in.cpp midi_in.cpp bridge.cpp emu_proto.cpp tones.cpp sendfx_pi.cpp spectrum_pi.cpp masterfx_pi.cpp fsweb.cpp update.cpp bundleweb.cpp poolweb.cpp bundle_pi.cpp recorder.cpp rec_play.cpp wifi_conf.cpp paircode.cpp power_state.cpp wgview_pi.cpp preset_pi.cpp chopview_pi.cpp seditview_pi.cpp presetweb.cpp voice_pi.cpp insfx_pi.cpp song_pi.cpp morph_pi.cpp xypad_pi.cpp \
-            scope_pi.cpp status_pi.cpp stor_vol.cpp stor_bench.cpp lib_pi.cpp
+            scope_pi.cpp status_pi.cpp stor_vol.cpp stor_bench.cpp lib_pi.cpp sdgrow.cpp
 # the SEQ page's engine side (seqed_pi.cpp, ../ui/seq_touch.cpp): only with the sequencer's engine in the tree
 # (core/seq/seq.cpp, the seq-mvp branch); without it the page says there is no sequencer
 SEQED := $(if $(wildcard $(CORE)/seq/seq.cpp),1,)

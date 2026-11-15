@@ -5,6 +5,7 @@
 #include <math.h>
 #include <stddef.h>
 #include "platform.h"
+#include "sidecar_features.h"
 #include <string.h>
 
 #include "lib/srclib.h"
@@ -25,8 +26,11 @@ constexpr int kPgHome = 0, kPgSound = 1, kPgSeq = 4, kPgRytm = 5, kPgVoice = 8, 
 struct TouchPage { const char* name; int page; };
 constexpr TouchPage kTouch[] = {{"HOME", kPgHome}, {"SEQ", kPgSeq}, {"PAT", kPgRytm}, {"VOICE", kPgVoice}, {"SET", kPgSound},
                                 {"INSERT FX", kPgIns}, {"REC", kPgRec}, {"SCOPE", kPgScope}, {"STATUS", kPgStatus},
-                                {"SONG", kPgSong}, {"PROJECT", kPgProject}, {"POOL", kPgPool},
-                                {"MORPH", kPgMorph}};
+                                {"SONG", kPgSong}, {"PROJECT", kPgProject}, {"POOL", kPgPool}
+#if SIDECAR_MORPH
+                                , {"MORPH", kPgMorph}   // 0.5.0: off (core/sidecar_features.h)
+#endif
+};
 int touch_page(const char* name) {
   for (const TouchPage& t : kTouch) if (sc_streq(t.name, name)) return t.page;
   return -1;

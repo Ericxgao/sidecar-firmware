@@ -28,6 +28,7 @@
 #include "sidecar_rec.h"		// page 11: REC, the Overbridge multitrack recorder (UP + T7, the home page's REC status)
 #include "sidecar_scope.h"		// page 12: SCOPE, an Overbridge channel's trace and the meters (UP + T9, VOICE's scope)
 #include "sidecar_status.h"		// page 13: SIDECAR STATUS (UP + T10, the home page's ENGINE / Status panel)
+#include "../../core/sidecar_features.h"	// SIDECAR_MORPH (0.5.0: the scene morph is off)
 #include "../../core/ui/page_keys.h"	// the device's shortcuts (the captions, the map): one table, device-agnostic
 #include "sidecar_project.h"		// page 14: PROJECT (project bundles: a tap on the home page's PROJECT panel)
 #include "sidecar_preset.h"		// page 18: PRESET, the POOL page's JUNO / 6-OP FM lists (the preset index; the pool tabs 4 and 5)
@@ -567,7 +568,9 @@ static void keys_auto_cb (lv_obj_t *o, int i, void *ud)	// Settings > MIDI: the 
 static void show_page (int page);
 static void ins_cb (lv_obj_t *o, int i, void *ud) { (void) o; (void) i; (void) ud; show_page (PG_INS); }	// fx-ins
 static void mfx_cb (lv_obj_t *o, int i, void *ud) { (void) o; (void) i; (void) ud; show_page (PG_MFX); }
+#if SIDECAR_MORPH
 static void morph_cb (lv_obj_t *o, int i, void *ud) { (void) o; (void) i; (void) ud; show_page (PG_MORPH); }
+#endif
 static void xy_cb (lv_obj_t *o, int i, void *ud) { (void) o; (void) i; (void) ud; show_page (PG_XY); }
 static void nav_cb (lv_obj_t *o, int i, void *ud)
 {
@@ -856,10 +859,17 @@ static void oled_fx (lv_obj_t *pg)
 	}
 	// the other FX pages: one row of four keys as tall as KILL TAILS (fx-ins INSERT FX, MASTER FX, 0.5.0 the scenes, the XY pad)
 	{
+#if SIDECAR_MORPH
 		static const char *const kName[4] = {"INSERTS", "MASTER", "MORPH", "XY"};
 		static const th_cb_t kCb[4] = {ins_cb, mfx_cb, morph_cb, xy_cb};
-		const int kw = (OW - LU (12) - 3 * LU (6)) / 4;
-		for (int i = 0; i < 4; i++)
+		enum { NK = 4 };
+#else	// 0.5.0: no MORPH key
+		static const char *const kName[3] = {"INSERTS", "MASTER", "XY"};
+		static const th_cb_t kCb[3] = {ins_cb, mfx_cb, xy_cb};
+		enum { NK = 3 };
+#endif
+		const int kw = (OW - LU (12) - (NK - 1) * LU (6)) / NK;
+		for (int i = 0; i < NK; i++)
 			th_key (p, LU (6) + i * (kw + LU (6)), LU (172) + dy, kw, LU (24), kName[i], TH_KEY | TH_KEY_SMALL, kCb[i], 0);
 	}
 }
@@ -1057,10 +1067,17 @@ static void sc_fx (lv_obj_t *pg)
 	th_key_led (s_Kill, LED_RED + 15);
 	// the other FX pages: one row of four keys as tall as Kill tails (fx-ins INSERT FX, MASTER FX, 0.5.0 the scenes, the XY pad)
 	{
+#if SIDECAR_MORPH
 		static const char *const kName[4] = {"Inserts", "Master", "Morph", "XY"};
 		static const th_cb_t kCb[4] = {ins_cb, mfx_cb, morph_cb, xy_cb};
-		const int kw = (LU (760) + dx - 3 * LU (8)) / 4;
-		for (int i = 0; i < 4; i++)
+		enum { NK = 4 };
+#else	// 0.5.0: no Morph key
+		static const char *const kName[3] = {"Inserts", "Master", "XY"};
+		static const th_cb_t kCb[3] = {ins_cb, mfx_cb, xy_cb};
+		enum { NK = 3 };
+#endif
+		const int kw = (LU (760) + dx - (NK - 1) * LU (8)) / NK;
+		for (int i = 0; i < NK; i++)
 			th_key_font (th_key (p, LU (8) + i * (kw + LU (8)), LU (88), kw, LU (52), kName[i], TH_KEY, kCb[i], 0), TH->f_title);
 	}
 	lv_obj_t *w = th_panel (p, LU (8), LU (148), LU (760) + dx, LU (148) + dy, "", TH_PANEL_WINDOW);
