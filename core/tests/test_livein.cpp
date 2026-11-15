@@ -525,6 +525,12 @@ int main() {
       f0 += kBlock;
     }
     livein::step();
+    // the clicks at the output at their level from before kVoiceGain (0.355 x 0.7 of int16 full scale, as seq=cal's
+    // click is): outl is in the voice's units (/ kVoiceGain), so its peak x kVoiceGain is the rows' own
+    float cpk = 0.0f;
+    for (float x : outl) cpk = std::fabs(x) > cpk ? std::fabs(x) : cpk;
+    printf("measure: the clicks' peak in the rows %.4f of full scale (before kVoiceGain 0.2485)\n", cpk * kVoiceGain);
+    CHECK(std::fabs(cpk * kVoiceGain - 0.355f * 0.7f) < 0.005f);
     livein::Stats s = livein::stats(kV);
     bool m = false;
     int ms10 = livein::latency_ms10(kV, &m);

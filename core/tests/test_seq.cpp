@@ -1403,6 +1403,9 @@ int main() {
     }
     printf("  calibration: round trip %d frames (latency %d)\n", seq::stats().cal_last, seq::view().latency);
     CHECK(seq::stats().cals == 1 && std::abs(seq::view().latency - D) <= kBlock);
+    int cpk = 0;   // the click at its own level, after kVoiceGain (voices.h), as LIVE IN's measure clicks leave
+    for (int16_t x : hist) cpk = std::abs((int)x) > cpk ? std::abs((int)x) : cpk;
+    CHECK(cpk == 12000);
     cmd("seq=lat:192");
   }
   // ---- the Rytm's own pattern by its SysEx dump: asked when the consumer turns it on, on a pattern change (debounced),
