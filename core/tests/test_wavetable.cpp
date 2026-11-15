@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <unistd.h>
+#include <sys/stat.h>   // chmod
 
 #include "check.h"
 #include "poly.h"
@@ -411,6 +412,51 @@ static void test_cpu() {
   wt::reset();
 }
 
+// a table that failed to load (here: a card file it could not open) is tried again when TBL picks it again; a voice
+// that leaves WAVETABLE gives its card table back (with four card slots, four voices that left must not keep a fifth
+// table from loading)
+static void test_retry_release() {
+  std::string W = g_card + "/WAVETABLES";
+  auto tone = [](int h) {
+    return wg::wav_bytes(4 * 2048, 1, 16, 48000, 1, "", [h](int i, int) { return 0.5 * std::sin(2 * M_PI * h * (i % 2048) / 2048.0); });
+  };
+  wg::write_file(W + "/t5.wav", tone(3));
+  wg::write_file(W + "/t6.wav", tone(5));
+  wg::write_file(W + "/late.wav", tone(7));
+  CHECK(pu::put(pools::kTables, "A011", "/WAVETABLES/t5.wav") == pools::kOk);
+  CHECK(pu::put(pools::kTables, "A012", "/WAVETABLES/t6.wav") == pools::kOk);
+  CHECK(pu::put(pools::kTables, "A013", "/WAVETABLES/late.wav") == pools::kOk);
+  idle();
+  const int t5 = entry("t5"), t6 = entry("t6"), late = entry("late");
+  CHECK(t5 > 0 && t6 > 0 && late > 0);
+  // four voices on four card tables: every slot selected
+  const int four[4] = {entry("harm"), entry("clm256"), entry("akwf600"), t5};
+  for (int vi = 0; vi < 4; ++vi) wg::params(kW, vi, P((float)four[vi], 0));
+  idle();
+  for (int vi = 0; vi < 4; ++vi) CHECK(wt::table_frames(four[vi]) > 0 && wt::voice_entry(vi) == four[vi]);
+  // they leave WAVETABLE (PLAITS): a fifth table on voice 4 loads into a slot they gave back
+  for (int vi = 0; vi < 4; ++vi) wg::params(kPlaits, vi, {0, 64, 64, 64, 64, 64, 64, 100, 64, 64, 0, 0, 0, 120, 0, 100});
+  wg::params(kW, 4, P((float)t6, 0));
+  idle();
+  CHECK(wt::table_frames(t6) > 0 && wt::voice_entry(4) == t6);
+  // a load that fails (the file cannot be opened), the log says so, the old table plays on
+  CHECK(chmod((W + "/late.wav").c_str(), 0) == 0);
+  uint32_t fails = wt::stats().load_fails;
+  wg::params(kW, 5, P((float)late, 0));
+  idle();
+  CHECK(wt::stats().load_fails == fails + 1 && wt::entry_state(late) == 5 && wt::table_frames(late) == 0);
+  CHECK(chmod((W + "/late.wav").c_str(), 0644) == 0);
+  wg::params(kW, 5, P((float)late, 0));   // the same TBL again (a report, a trig): no new load
+  idle();
+  CHECK(wt::stats().load_fails == fails + 1 && wt::entry_state(late) == 5);
+  wg::params(kW, 5, P(1, 0));             // TBL away and back: tried again, and in
+  wg::params(kW, 5, P((float)late, 0));
+  idle();
+  CHECK(wt::table_frames(late) > 0 && wt::voice_entry(5) == late && wt::entry_state(late) == 3);
+  for (int vi = 0; vi < 6; ++vi) wg::off(vi);
+  wt::reset();
+}
+
 int main() {
   test_wav_read();
   test_frames();
@@ -436,6 +482,7 @@ int main() {
   test_chords_live();
   test_golden();
   test_cpu();
+  test_retry_release();
   system(("rm -rf '" + g_card + "'").c_str());
   printf("test_wavetable: PASS\n");
   return 0;

@@ -208,6 +208,9 @@ CORE_COLD void select(int vi) {
   int e = srclib::code_of(vp[vi][0]);   // the pool row: bank * 128 + row
   if (!list || e < 0 || e >= nlist) return;
   if (v[vi].wt || force[vi]) pools::voice_on(pools::kTables, vi, e);
+  // a table that failed to load, picked again (TBL away and back): tried again (the card was busy, the file is
+  // fixed); the same TBL at every report or trig does not reload it
+  if (e != want[vi] && failed[e]) failed[e] = 0, why[e] = 0;
   want[vi] = (int16_t)e;
   if (srclib::silent(list, e)) return;   // OFF / empty / missing: no sound (a trig skips it)
   int t = resident(e);
@@ -591,6 +594,13 @@ CORE_COLD void silence(int vi) {
     n.held = n.live = false;
     st_rel(&n.kill_n, n.kill_n + 1);
   }
+}
+
+CORE_COLD void leave(int vi) {   // the voice left WAVETABLE: its notes end, its selection drops (its card table may go)
+  vi &= 7;
+  silence(vi);
+  want[vi] = -1;
+  __atomic_store_n(&sel[vi], (uint32_t)kTables, __ATOMIC_SEQ_CST);
 }
 
 CORE_COLD const char* entry_name(int e) {

@@ -909,7 +909,7 @@ __attribute__((noinline)) CORE_COLD void voice_report(int cmd, const uint8_t* d,
   x.gr = m == kGranMachine;
   x.cp = m == kChopMachine;
   if (was_ms && !x.ms) msamp::silence(vi);
-  if (was_wt && !x.wt) wt::silence(vi);
+  if (was_wt && !x.wt) wt::leave(vi);
   if (was_gr && !x.gr) gr::silence(vi);
   if (was_cp && !x.cp) chop::silence(vi);
 #endif
