@@ -5,6 +5,7 @@
 #include "sidecar_xy.h"
 #include "sidecar_theme.h"
 #include "lvgl.h"
+#include "../../core/sidecar_features.h"	// SIDECAR_MORPH
 #include <stdlib.h>
 #include <string.h>
 
@@ -473,6 +474,9 @@ void sidecar_xy_create (void *parent, int y0)
 	lv_obj_set_width (s_PickT, aw);
 	const int ph1 = lv_font_get_line_height (o ? TH->f_body : TH->f_mid), sh = keyh * 2 + g;
 	s_Kinds = th_seg (s_Pick, 0, ph1 + g, aw, sh, kKindMap, kind, kind_cb, 0);
+#if !SIDECAR_MORPH
+	if (th_seg_item (s_Kinds, K_MORPH)) lv_obj_add_flag (th_seg_item (s_Kinds, K_MORPH), LV_OBJ_FLAG_HIDDEN);	// 0.5.0: MORPH is not offered as a target
+#endif
 	const int sk = o ? LU (26) : LU (56), ry = ph1 + sh + 2 * g, lw2 = o ? LU (40) : LU (90);
 	const char *cap[2] = {"INDEX", "PARAM"};
 	lv_obj_t **lab[2] = {&s_IdxL, &s_ParL}, **mk[2] = {&s_IdxM, &s_ParM}, **pk[2] = {&s_IdxP, &s_ParP};

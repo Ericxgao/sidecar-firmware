@@ -1,5 +1,6 @@
 // core/ui/remote.cpp - see remote.h. Cold (program flash on the Teensy): a tick draws only while the page is open.
 #include "md/md.h"   // CORE_MD
+#include "sidecar_features.h"
 #include "ui/remote.h"
 
 #include <string.h>
@@ -1871,6 +1872,10 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
           s.map_over = false;
           if (keys_map_over(false) && s.open && s.voice != s.map_back) s.voice = s.map_back, s.page_changed = true, s.input = true, s.via = -1;
         }
+        return;
+      }
+      if (!SIDECAR_MORPH && b[0] == 1 && n >= 2 && b[1] == 14) {   // UP + T14 (the rc5b mod still forwards it): the MORPH page is off
+        remote_popup("MORPH: 0.5.1");
         return;
       }
       if (b[0] == 1 && n >= 2 && (b[1] == kPageFill || b[1] == kPageGenerator)) {   // 0.5.0: UP + RIGHT / LEFT

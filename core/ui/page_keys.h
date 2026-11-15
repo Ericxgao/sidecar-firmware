@@ -28,6 +28,8 @@
 #ifndef CORE_UI_PAGE_KEYS_H
 #define CORE_UI_PAGE_KEYS_H
 
+#include "../sidecar_features.h"
+
 typedef struct {
 	unsigned char code;	/* the device's page request (49 1 <code>); on the Rytm UP + T<code> */
 	const char *name;	/* the page: the touchscreen's page of that name, its navigation caption, the TOUCH: popup */
@@ -75,8 +77,10 @@ static const sc_page_key_t sc_rytm_mk2_pages[] = {
 	{7, "REC", "REC", ""},		{8, "SET", 0, ""},		{9, "SCOPE", "SCOPE", ""},
 	{10, "STATUS", "SIDECAR", ""},	{11, "SAMPLE", "SAMPLE", ", AGAIN: AUTO"},
 	{12, "PROJECT", "PROJECT", ""},	{13, "POOL", "POOL", ""},
+#if SIDECAR_MORPH
 	{14, "MORPH", "MORPH", ""},	/* 0.5.0 (spec-050 2.6): needs the 0.5.0 flash's 0026 (UP + T14: rui.c forwards
 					   UP + T1..T13 today); until then the SIDECAR MENU's row */
+#endif	/* 0.5.0: the MORPH page is off (SIDECAR_MORPH 0): UP + T14, which the rc5b mod still forwards, finds no row and does nothing */
 };
 static const sc_combo_t sc_rytm_mk2_combos[] = {
 	{"pages", "UP+YES", "SIDECAR (YES: MENU)", "YES PAGES", "TRK+YES", 0},
