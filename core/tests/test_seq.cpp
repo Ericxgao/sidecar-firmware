@@ -2944,6 +2944,16 @@ int main() {
     enc(0, -5);
     printf("  trk-rec: INSERT's A in seq mode, no step held: P1 moved by %d (want -5)\n", sum() - s0);
     CHECK(sum() == s0 - 5);
+    // a step held (the Rytm sends the turn only then with the SEQ page not shown): the held step's values, INSERT's not
+    seq::Track* tr = seq::edit_track(0, false);
+    CHECK(tr);
+    seq::add_note(tr->step[0], {48, 100, 24, 0, 0});
+    const seq::Step st0 = tr->step[0];
+    seq::ui_key(0, true, false);
+    s0 = sum();
+    enc(1, 5);   // B: VEL
+    seq::ui_key(0, false, false);
+    CHECK(sum() == s0 && memcmp(&st0, &tr->step[0], sizeof st0) != 0);
     direct_state({8, 0, 0x7F});
     seq::tick(now_ms() + 160);
     const uint8_t closed[] = {0xF0, 0x7D, 0x52, 0x54, 0x30, 1, 0, 0, 1, 0xF7};
