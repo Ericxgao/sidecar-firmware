@@ -590,7 +590,7 @@ CORE_COLD bool voice_screen(Canvas& c, PageView& view, const Page& p, const Sour
 }
 
 CORE_COLD int voice_screen_echo_slot(const Page* p, int e) {
-  if (p == &kDspsPageDt || p == &kGrainPageDt) return kSlotFoot + 1;
+  if (p == &kDspsPageDt || p == &kGrainPageDt) return e == 3 ? 0 : kSlotFoot + 1;   // (PLAY: a mode word, not a number)
 #if CORE_POLY && CORE_MSAMP
   if (p == &kChopSrcPage) return e == 1 ? 0 : kSlotFoot + 1;   // (SLC's value is 6/16, not a number the Rytm can echo)
 #endif

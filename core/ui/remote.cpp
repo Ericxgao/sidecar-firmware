@@ -407,7 +407,7 @@ struct State {
   uint32_t commit_ms = 0;    // 0.4.3: the last page / SRC view commit (kPlayCommitMs) and what it showed (page_key)
   int commit_page = -1000;
   int touched = -1;          // the encoder turned last (0..7): its cell's tiles go first, the bottom bar names it
-  uint32_t touch_ms = 0;     // 0.5.0 screens: when (they name the knob for kScreenTurnMs)
+  uint32_t touch_ms = 0;     // 0.5.0 screens: when (they name the knob for kScreenTurnMs; touched / src_last >= 0 say it is set)
   uint32_t src_last_ms = 0;  // ... the SRC view's last changed knob
   // the local echo (3F) as the Rytm has it: per encoder the slot (kEchoNone: none), the value, flags and prefix
   uint8_t echo_slot[8], echo_val[8], echo_flags[8];
@@ -714,7 +714,7 @@ CORE_COLD void on_enc(int e, int delta, bool func) {
     return;
   }
   if (s.voice < 0 || src_capable || e < 0 || e > 7) return;
-  s.touched = e, s.touch_ms = now_ms() | 1;
+  s.touched = e, s.touch_ms = now_ms();
   const Page* p = page_for_voice(named_machine(machine_of_voice(s.voice), s.voice), s.voice);
   if (!p || p->enc[e] == kNone) return;
   int k = p->enc[e] & 15, cur = (int)mod::base_of(s.voice, k, v[s.voice].p[k]);
@@ -1168,13 +1168,12 @@ CORE_COLD void src_tick(uint32_t ms) {
 #else
     sniprintf(right, sizeof right, "%s", kTrackName[t]);
 #endif
-    int drawn = 0, e = 0;
-    for (int i = 0; i < 8; ++i)
-      if (s.src_last >= 0 && p->enc[i] == s.src_last) e = i;
-    const bool turned = s.src_last >= 0 && turn_live(ms, s.src_last_ms, kScreenTurnMs);
+    int drawn = 0;
+    const int e = enc_of_param(*p, s.src_last);   // -1: a parameter on no knob of this page (a CC, a lock): no knob named
+    const bool turned = e >= 0 && turn_live(ms, s.src_last_ms, kScreenTurnMs);
     if (!voice_screen(work, view, *p, tsrc, right, 0, 0, turned ? e : -1, true, &drawn)) {
       drawn = view.draw(work, *p, tsrc, right, 0, 0);
-      voice_footer(*p, kTrackName[t], tsrc, e);
+      voice_footer(*p, kTrackName[t], tsrc, e < 0 ? 0 : e);
     }
     s.stats.widgets += (uint32_t)drawn;
     uint32_t mask[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
@@ -1828,7 +1827,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         midim::report(kTrackVoice[t], -1, 0, w);
       }
 #endif
-      if (b[2] == 1) s.src_last = (int8_t)b[1], s.src_last_ms = now_ms() | 1;
+      if (b[2] == 1) s.src_last = (int8_t)b[1], s.src_last_ms = now_ms();
       else if (t == s.src_track) src_list_quiet();   // a kit's values at once (a load): no list for its SRC
       if (t == s.src_track) {   // drawn at once (the input path), a burst coalesced to its latest values
         s.input = true;

@@ -109,6 +109,9 @@ int main() {
   CHECK(voice_screen(c, view, *gp, s, "BD", 0, 0, 2, true, &drawn) && drawn > 0 && !strcmp(slot(kSlotFoot + 1).s, "71"));
   // the echo's slot: SAMPLER's value box
   CHECK(voice_screen_echo_slot(pg, 2) == kSlotFoot + 1 && voice_screen_echo_slot(page_for_machine(kPlaits), 2) == kSlotFoot);
+  CHECK(voice_screen_echo_slot(pg, 3) == 0 && voice_screen_echo_slot(gp, 3) == 0);   // PLAY: the footer's word, no number echoed
+  // the SRC view names a knob only for a parameter on one (review M1): SMP (P11) is A, P2 is on no knob of SAMPLER
+  CHECK(enc_of_param(*pg, 10) == 0 && enc_of_param(*pg, 13) == 2 && enc_of_param(*pg, 1) == -1 && enc_of_param(*pg, -1) == -1);
   CHECK(system((std::string("rm -rf '") + tmpl + "'").c_str()) == 0);
   printf("test_screens_voice: PASS\n");
   return 0;

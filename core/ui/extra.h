@@ -217,6 +217,12 @@ bool voice_screen(Canvas& c, PageView& view, const Page& p, const Source& s, con
 // the text slot the Rytm's local echo of encoder e's value goes to on that page (the bottom bar's value box), 0: no echo
 // (a page drawn as before has the old bottom bar's slot, kSlotFoot)
 int voice_screen_echo_slot(const Page* p, int e);
+// the encoder (0..7) a page puts a parameter on, -1 when none does (0.5.0 screens: the SRC view names only a knob it has)
+inline int enc_of_param(const Page& p, int param) {
+  for (int i = 0; i < 8; ++i)
+    if (param >= 0 && p.enc[i] == param) return i;
+  return -1;
+}
 void chop_page_up_cancel();   // a UP combo reached the host (49 / 30 / 29): the tap in the making is no tap
 // SAMPLE EDIT (page_sedit.cpp, core/samp/sedit.h): the sample editor on the Rytm's screen (off the ring; shown while an
 // edit is open). sedit_src_push: a push of encoder B on a DSP SAMPLE track's SRC view (31 0x71) opens the track's sample
