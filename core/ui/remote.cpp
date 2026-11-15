@@ -374,6 +374,10 @@ struct State {
   // 0.5.0 (spec-050 2.6): the keys an engine page with key_up took at their press (bit c: code c), and that page
   uint32_t held_keys[8] = {};
   const ExtraPage* held_page = nullptr;
+  // 0.5.0 UI feel: the held UP / DOWN / LEFT / RIGHT a page took repeats (kRepeatFirstMs ...): its code (-1 none), the page,
+  // the press, the next repeat
+  int rep_code = -1, rep_voice = 0;
+  uint32_t rep_t0 = 0, rep_next = 0;
   // 0.5.0 (spec-050 2.6, EDIT): the scene key (T1..T12: 0..11) held on a page that locks, -1 none; the target a turn
   // locked last while it is held (the bottom bar shows its locked value), 0 none
   int scene_key = -1;
@@ -567,6 +571,7 @@ CORE_COLD const ExtraPage* extra_of(int id) { return id <= kExtra0 ? &extra_page
 // sc_shortcut_only: SEQ, INSERT, POOL, CHOP) replaces the Rytm's screen as the SRC view does - no page dots, and LEFT /
 // RIGHT / DOWN / PAGE are its own or nothing, never the ring's. NO (or its UP + key again) leaves it.
 CORE_COLD bool standalone(const ExtraPage* x) { return x && (x->off_ring || sc_shortcut_only(x->title)); }
+CORE_COLD bool scrolls_updown(const ExtraPage* x);   // (below, with the mask's rule)
 // ux1027 (review 5): the page shown goes from `from` to `to`: leaving the LFO page drops its design view (it opens on
 // the main view again, T1..T16 not caught)
 CORE_COLD void lfo_left(int from, int to) {
@@ -740,6 +745,7 @@ CORE_COLD void release_held() {
     }
   s.held_page = nullptr;
   s.scene_key = -1, s.edit_tid = 0, s.edit_refused = false;
+  s.rep_code = -1;   // (and nothing repeats on: the release is lost too)
 }
 
 CORE_COLD bool key_held(int code) { return code >= 0 && code < 256 && (s.held_keys[code >> 5] >> (code & 31) & 1); }
@@ -769,6 +775,9 @@ CORE_COLD void on_key(int code, bool down) {
         if (s.held_page != x) release_held();
         s.held_page = x, s.held_keys[code >> 5] |= 1u << (code & 31);
       }
+      // 0.5.0: UP / DOWN of a page that scrolls with them, LEFT / RIGHT it took: they repeat while held
+      if (code == kKeyLeft || code == kKeyRight || ((code == kKeyUp || code == kKeyDown) && scrolls_updown(x)))
+        s.rep_code = code, s.rep_voice = s.voice, s.rep_t0 = now_ms(), s.rep_next = s.rep_t0 + kRepeatFirstMs;
 #if CORE_POLY && CORE_MSAMP
       // SAMPLE EDIT's DISCARD EDIT? YES closed the edit: the page is out of the list, so back where it was opened from
       // (SAMPLE EDIT alone: other pages a key hides keep their own way, PROJECT's answer note among them)
@@ -1649,6 +1658,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       if (n < 3) break;
       s.stats.keys++;
       s.user = true;
+      if (b[2] || (b[0] << 7 | b[1]) == s.rep_code) s.rep_code = -1;   // 0.5.0: another key pressed, or the repeating one let go
       if (b[2]) popup_key_closed();
       // the pairing code's modal over an open page: a key takes it off (the user has read it) and does nothing else;
       // its release is eaten too, so the page does not see half a press. (With the page closed no key reaches us: the
@@ -2012,6 +2022,29 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
   s.stats.bad++;
 }
 
+// 0.5.0 UI feel: the Rytm sends a held key's press and release only, so a page that took UP / DOWN / LEFT / RIGHT gets them
+// again from here, the way a list scrolls on the Rytm: the first after kRepeatFirstMs, then every kRepeatMs. It stops on the
+// release (remote_sysex), another key, a page change, the page closing, a hello (release_held), when the page stops taking
+// the key (the end of its list: false), and after kRepeatCapMs, so a release lost with the link cannot repeat for ever.
+static CORE_COLD void key_repeat_tick(uint32_t ms) {
+  const ExtraPage* x = s.open ? extra_of(s.voice) : nullptr;
+  if (!x || !x->key || s.voice != s.rep_voice || ms - s.rep_t0 >= (uint32_t)kRepeatCapMs) {
+    s.rep_code = -1;
+    return;
+  }
+  for (int n = 0; (int32_t)(ms - s.rep_next) >= 0; ++n) {
+    if (n == 4) {   // (a stalled engine: no burst, on from now)
+      s.rep_next = ms + kRepeatMs;
+      break;
+    }
+    if (!x->key(s.rep_code)) {
+      s.rep_code = -1;
+      return;
+    }
+    s.rep_next += kRepeatMs, s.input = true;
+  }
+}
+
 CORE_COLD void remote_tick(uint32_t ms) {
   if (g_going_down && !g_fill_keys_off) g_fill_keys_off = true, fill_unclaim();   // (a planned reboot: remote.h)
   if (!s.presets_told && s.src_track >= 0) {
@@ -2023,6 +2056,7 @@ CORE_COLD void remote_tick(uint32_t ms) {
     }
   }
   s.now_ms = ms;
+  if (s.rep_code >= 0) key_repeat_tick(ms);
   page_two_tick(ms);   // rc5: a machine list choice's page-2 defaults
 #if CORE_POLY && CORE_MSAMP
   static uint32_t rename_seen = 0;   // UX review B1: a rename's question shows the PROJECT page (it asks there)
@@ -2398,6 +2432,8 @@ CORE_COLD int remote_track_param(int t, int k) {
   return tsrc.param(k & 15);
 }
 CORE_COLD const Page* remote_track_page(int t) { return t >= 0 && t < 12 ? track_page(t) : nullptr; }
+
+CORE_COLD bool remote_key_repeating() { return s.rep_code >= 0; }
 
 CORE_COLD void remote_reset() {
   s = State();

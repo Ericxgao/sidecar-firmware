@@ -194,6 +194,11 @@ const uint8_t* remote_frame();   // the last frame sent (what the Rytm's shadow 
 void preview_sent(uint8_t out[kBytes]);   // that frame with its text slots in the host's font (preview())
 int sent_texts(uint8_t* out, int max);    // its text items, 36 B each (x, y, font, flags, 32 chars); how many
 void remote_reset();             // tests: closed, statistics and held edits cleared
+// 0.5.0 UI feel: a held UP / DOWN / LEFT / RIGHT the page took repeats on the host (the Rytm sends the press and the release
+// only): the first repeat kRepeatFirstMs after the press, then one every kRepeatMs; it gives up after kRepeatCapMs (a release
+// lost with the link). [The stock list pages' own rate could not be measured here: no emulator in this lane.]
+constexpr int kRepeatFirstMs = 400, kRepeatMs = 80, kRepeatCapMs = 10000;
+bool remote_key_repeating();     // tests: a held UP / DOWN / LEFT / RIGHT is repeating (remote.cpp kRepeatFirstMs)
 int remote_track_machine(int t);  // 1025: track t's voice byte from the Rytm's 33 (0x7F not a Sidecar machine), -1 none
 int remote_track_rytm_machine(int t);   // 0.5.0: track t's machine number from the 33 (the Rytm's 0..52), -1 none
 // SAMPLER (machines.h kSmplMachine): track t's 33 named machine 43 on DSP SAMPLE's flag; voice vi's first Sidecar track

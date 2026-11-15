@@ -194,6 +194,63 @@ static void test_up_scrolls() {
   remote_slots(nullptr);
 }
 
+static void hold_ms(int ms) {   // the ticks of a held key, every 20 ms
+  for (int t = 20; t <= ms; t += 20) tick(1, 20);
+}
+static void test_repeat() {
+  const std::vector<std::string> r = rows(16);
+  const int more = (1000 - kRepeatFirstMs) / kRepeatMs + 1;   // the repeats within a second of the press
+  key(kDown, true);
+  CHECK(cursor() == r[1] && remote_key_repeating());
+  hold_ms(1000);
+  CHECK(cursor() == r[1 + more]);
+  key(kDown, false);   // let go: it stops where it is
+  hold_ms(1000);
+  CHECK(cursor() == r[1 + more] && !remote_key_repeating());
+  // before the first repeat's delay: nothing yet
+  open_menu();
+  key(kDown, true), hold_ms(kRepeatFirstMs - 20);
+  CHECK(cursor() == r[1]);
+  key(kDown, false);
+  // UP too, back up
+  open_menu();
+  for (int k = 0; k < 12; ++k) tap(kDown);
+  key(kUp, true), hold_ms(1000);
+  CHECK(cursor() == r[12 - 1 - more]);
+  key(kUp, false);
+  // another key pressed: it stops (T6 is nobody's on the MENU)
+  open_menu();
+  key(kDown, true), hold_ms(300);
+  CHECK(remote_key_repeating());
+  key(5, true);
+  CHECK(!remote_key_repeating());
+  key(5, false), key(kDown, false);
+  // a page change stops it
+  open_menu();
+  key(kDown, true), hold_ms(300);
+  CHECK(remote_key_repeating());
+  remote_show_page("KEYS"), tick(2, 20);
+  CHECK(!remote_key_repeating());
+  key(kDown, false);
+  // a hello (a new link: the releases are lost) stops it
+  open_menu();
+  key(kDown, true), hold_ms(300);
+  from_rytm(0x35, 1, 0, 1);
+  CHECK(!remote_key_repeating());
+  // a release that never comes: it gives up after kRepeatCapMs
+  open_menu();
+  key(kDown, true), hold_ms(1000);
+  CHECK(remote_key_repeating());
+  for (int t = 0; t < kRepeatCapMs; t += 100) tick(1, 100);
+  CHECK(!remote_key_repeating());
+  key(kDown, false);
+  // a voice page: DOWN is the ring's next page, no repeat; UP there is the Rytm's (not claimed for a scroll)
+  plaits_page(63);
+  key(kDown, true);
+  CHECK(!remote_key_repeating());
+  key(kDown, false);
+}
+
 int main() {
   char tmpl[] = "/tmp/core_uifeel_XXXXXX";
   CHECK(mkdtemp(tmpl));
@@ -202,7 +259,7 @@ int main() {
   hooks.to_rytm = out;
   at(g_us);
   CHECK(engine_begin());
-  struct { const char* name; void (*fn)(); } tests[] = {{"detent", test_detent}, {"detent_lfo", test_detent_lfo}, {"func", test_func_coarse}, {"up_scrolls", test_up_scrolls}};
+  struct { const char* name; void (*fn)(); } tests[] = {{"detent", test_detent}, {"detent_lfo", test_detent_lfo}, {"func", test_func_coarse}, {"up_scrolls", test_up_scrolls}, {"repeat", test_repeat}};
   for (auto& t : tests) printf("-- %s\n", t.name), fflush(stdout), t.fn();
   remote_reset();
   system((std::string("rm -rf '") + tmpl + "'").c_str());
