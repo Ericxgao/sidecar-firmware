@@ -35,6 +35,7 @@
 #include "granular/granular.h"
 #include "msamp/msamp.h"
 #include "msamp/sdtest.h"
+#include "wavetable/wavetable.h"
 #include "bundle/prjslot.h"
 #include "bundle/rename.h"
 #include "nmach.h"
@@ -194,6 +195,28 @@ CORE_COLD bool juno_partner(int t) {
   for (int u = 0; u < 12; ++u)
     if (u != t && kTrackVoice[u] == kTrackVoice[t] && track_vb[u] != kNotOurs && machine_of(track_vb[u]) == kJuno) return true;
   return false;
+}
+// 0.5.0 (owner 2026-11-15, hardware: a new SAMPLER, a sample picked in the pool list: SAMPLE EDIT said NO SAMPLE until it
+// had played; WAVETABLE knew its table only after a note): the voice's own state comes from the Rytm's 0x03 / 0x04
+// reports, which come only while it plays, so a pick or a turn on an idle voice reached the host as the SRC view's 2A
+// alone (src14) and stayed there. A new src14 of track t selects that entry on its voice as the next report would:
+// WAVETABLE's TBL, GRANULAR's SRC, MULTISAMPLE's INST (P1: their tables, samples and instruments load, their views show
+// them). CHOP takes src14 itself (chop.cpp preload_step); DSP SAMPLE / SAMPLER's SMP is read from src14 where it is
+// used (SAMPLE EDIT: sedit::open_track; the SRC view draws the 2A's), the voice's state left as its reports set it.
+// Only on a voice whose last report was that machine (its flags) and no other track of ours on the voice with the same
+// machine (whose sound the voice plays is the one that trigged last: unknown here).
+CORE_COLD void src_to_voice(int t, int c14) {
+  if (!have_tracks || t < 0 || t >= 12 || track_vb[t] == kNotOurs || c14 < 0) return;
+#if CORE_MSAMP
+  const int m = machine_of(track_vb[t]), vi = kTrackVoice[t];
+  for (int u = 0; u < 12; ++u)
+    if (u != t && kTrackVoice[u] == vi && track_vb[u] != kNotOurs && machine_of(track_vb[u]) == m) return;
+  const V& x = v[vi];
+  const int e = srclib::code_of14(c14);
+  if (m == kWaveMachine && x.wt) wt::kit_src(vi, e);
+  else if (m == kGranMachine && x.gr) gr::kit_src(vi, e);
+  else if (m == kMultiMachine && x.ms) msamp::kit_src(vi, e);
+#endif
 }
 CORE_COLD int machine_of_voice(int vi) {
   vi &= 7;
@@ -445,6 +468,9 @@ struct State {
   uint16_t keep_known[12] = {}, keep_mask = 0;
   uint8_t srcl[12][16] = {};      // rui1038: the 2A's fraction bytes (P1 of GRANULAR / WAVETABLE / MULTISAMPLE: bank << 4)
   int16_t src14[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // P1's last 14 bits by 2A or our 48 (song)
+  // 0.5.0: which is newer, the Rytm's own word on a track's src14 (its 2A; our 48s are only asked) or its voice's last
+  // report (remote_track_src14_fresh): one count of both
+  uint32_t src14_at[12] = {}, rep_at[8] = {}, at_n = 0;
   int16_t wr_pat[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // P1 our 48 wrote, its answer owed (presetpick)
   uint8_t wr_ans[12][16] = {};   // remote_track_write's answers: 0 none, 1 owed, 2 + the Rytm's status
   uint16_t src_known[12] = {};
@@ -1751,9 +1777,12 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       }
       if (b[1] != 1) page_two_cancel();                          // rc5: a snapshot (a load) is no list choice
       else if (s.mlist) s.mlist_moved |= (uint16_t)(1u << b[0]);
-      for (int i = 0; i < b[1]; ++i)
-        track_vb[b[0] + i] = track_vb_of(b[0] + i, b[3 + 2 * i], b[2 + 2 * i]), tracks_known |= (uint16_t)(1u << (b[0] + i)),
-        track_smpl[b[0] + i] = b[2 + 2 * i] == kRytmSampler, track_rm[b[0] + i] = b[2 + 2 * i];
+      for (int i = 0; i < b[1]; ++i) {
+        const int t = b[0] + i;
+        const uint8_t vb = track_vb_of(t, b[3 + 2 * i], b[2 + 2 * i]);
+        if (vb != track_vb[t] || b[2 + 2 * i] != track_rm[t]) s.src14[t] = -1;   // 0.5.0: another machine's knob is no SMP / TBL
+        track_vb[t] = vb, tracks_known |= (uint16_t)(1u << t), track_smpl[t] = b[2 + 2 * i] == kRytmSampler, track_rm[t] = b[2 + 2 * i];
+      }
       have_tracks = true;
       for (int vi = 0; vi < kVoices; ++vi) {   // polyuser-4 F-b1: a voice with no report yet takes its tracks' machine
         int m = -1;
@@ -1836,7 +1865,11 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       }
       if (!held) {   // rui1038: the banked knob's 14 bits (song): P1, or DSP SAMPLE's SMP P11 (rui1045)
         int kb = remote_track_src_param(t);
-        if (b[1] <= kb && kb < b[1] + b[2]) s.src14[t] = (int16_t)((b[3 + 2 * (kb - b[1])] & 0x7F) << 7 | (b[4 + 2 * (kb - b[1])] & 0x7F));
+        if (b[1] <= kb && kb < b[1] + b[2]) {
+          const int16_t c14 = (int16_t)((b[3 + 2 * (kb - b[1])] & 0x7F) << 7 | (b[4 + 2 * (kb - b[1])] & 0x7F));
+          if (c14 != s.src14[t]) src_to_voice(t, c14);   // 0.5.0: an idle voice's pick (src_to_voice)
+          s.src14[t] = c14, s.src14_at[t] = ++s.at_n;
+        }
       }
 #if CORE_MSAMP
       if (!held && have_tracks && track_vb[t] != kNotOurs && (track_vb[t] & kMidiMachine) && s.src_known[t] == 0xFFFF) {
@@ -2197,6 +2230,7 @@ CORE_COLD void remote_src_log(bool on) { src_log = on; }
 CORE_COLD void remote_params(int vi, int m, float* p, int np) {
   vi &= 7;
   reported[vi] = true;
+  s.rep_at[vi] = ++s.at_n;
   if (s.self) return;
   if (s.held_m[vi] != m) s.held[vi] = 0, s.held_m[vi] = (uint8_t)m;   // another machine: its edits go
   for (int k = 0; k < np && k < 16; ++k) {
@@ -2401,6 +2435,9 @@ CORE_COLD int remote_track_write_answer(int t, int k) {
   return a == 0 ? -2 : a == 1 ? -1 : a - 2;
 }
 CORE_COLD int remote_track_src14(int t) { return t >= 0 && t < 12 ? s.src14[t] : -1; }
+CORE_COLD int remote_track_src14_fresh(int t) {
+  return t >= 0 && t < 12 && s.src14[t] >= 0 && s.src14_at[t] > s.rep_at[kTrackVoice[t]] ? s.src14[t] : -1;
+}
 CORE_COLD int remote_track_src_value(int t, int k) {
   return t >= 0 && t < 12 && k >= 0 && k < 16 && (s.src_known[t] >> k & 1) ? s.srcv[t][k] : -1;
 }

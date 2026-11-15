@@ -1951,6 +1951,12 @@ CORE_COLD bool pick(int vi, int e) {   // the touchscreen's choice: INST written
   log(CORE_STR("msamp: voice %d: INST %c%03d %s"), vi, 'A' + srclib::bank_of(e), e & 127, entry_name(e));
   return true;
 }
+CORE_COLD void kit_src(int vi, int e) {
+  vi &= 7;
+  if (!job || !list || e < 0 || e >= nlist) return;
+  vp[vi][0] = (float)(e & 127) + (float)srclib::lo_of(e) / 128.0f;
+  select(vi);
+}
 
 CORE_COLD void silence(int vi) {
   vi &= 7;
