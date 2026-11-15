@@ -4717,7 +4717,11 @@ CORE_COLD void selected_track(int t) {
     ui.view_opened = false, we_opened = false;
     ui::remote_request(false);
     log(CORE_STR("seq: track %d selected (no seq track): the SEQ page closed"), t + 1);
+    return;
   }
+  // 0.5.0 (TRK + pad on an open page): the SEQ page shown otherwise (the ring, UP + T2) follows with that track's make
+  // or explain prompt, as TRK + TRIG would (a track on the Rytm's own synth: remote.cpp closes the page)
+  if (seq_shown()) ui.track = t, ui.page = 0, ui.prompt = can_seq(t) == 1 ? kPromptMake : kPromptExplain, ui.prompt_track = t;
 }
 CORE_COLD void page_closed() {
   if (!cur) reset();

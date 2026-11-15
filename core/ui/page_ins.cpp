@@ -420,6 +420,8 @@ CORE_COLD void ins_open_out() {
 UI_ROM const ExtraPage kInsPage = {"INSERT", ins_shown, ins_draw, ins_enc, ins_key, 0xFF, false, nullptr, nullptr, nullptr,
                                    false, nullptr, ins_enc_tid};
 
+CORE_COLD bool ins_page_bus() { return ip.bus; }
+
 #if CORE_UI_TOOLS
 void ins_page_set(bool bus, int slot, int busel, int track, bool out, bool eq) {   // tests and the renderer
   ip.bus = bus, ip.out = out, ip.eq = eq, ip.slot = slot, ip.busel = busel, ip.track = track, ip.manual = track >= 0,

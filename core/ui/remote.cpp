@@ -1883,6 +1883,15 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 #if CORE_POLY
         if (moved) seq::selected_track(b[1]), core::poly::selected_voice(remote_track_voice(b[1]));   // rui1040: the SEQ page
                                                   // follows the selection (or closes); the pads' binding too
+        // 0.5.0 (TRK + pad on an open page): the track pages (SEQ, INSERT's track view, ARP, POLY) follow the selection;
+        // on a track of the Rytm's own synth they close back to the Rytm. LFO, INSERT's BUS view and the global pages
+        // stay. (A pattern or kit load that moves the selection does the same.)
+        if (moved && s.open && have_tracks && track_vb[b[1]] == kNotOurs && !s.popup) {
+          const ExtraPage* x = extra_of(s.voice);
+          if (x && ((!strcmp(x->title, "INSERT") && !ins_page_bus()) || !strcmp(x->title, "SEQ") ||
+                    !strcmp(x->title, "ARP") || !strcmp(x->title, "POLY")))
+            remote_request(false);
+        }
 #endif
         disp.info_gen = disp.info_gen + 1;
         return;

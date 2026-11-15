@@ -2960,6 +2960,77 @@ int main() {
     engine_sysex(closed, sizeof closed);
     ins::reset();
   }
+  // ---- TRK + pad on an open page (a user, 0.5.0): rc5b's 49 02 on every selection change. SEQ, INSERT's track view,
+  // ARP and POLY follow the selection; on a track of the Rytm's own synth they close back to the Rytm (3A 0); SEQ on a
+  // Sidecar track that is no seq track shows its make prompt. LFO, INSERT's BUS view and the global pages stay
+  {
+    report(kFm | 7, {0, 64, 64, 127, 64, 64, 100, 127});   // RS's voice (7)
+    report(kFm | 1, {0, 64, 64, 127, 64, 64, 100, 127});   // BT's voice (1)
+    cmd("seq=track:1:on"), cmd("seq=track:3:on"), cmd("seq=track:5:off");   // BD, RS seq tracks; BT not
+    {   // 33: BD, RS, BT on 6-OP FM (Sidecar voices 0, 7, 1), the rest the Rytm's own synth (7F)
+      std::vector<uint8_t> b = {0, 12};
+      for (int t = 0; t < 12; ++t) b.push_back(46), b.push_back(t == 0 ? 0x48 : t == 2 ? 0x4F : t == 4 ? 0x49 : 0x7F);
+      auto m = msg(0x33, b);
+      engine_sysex(m.data(), (int)m.size());
+    }
+    const uint8_t closed[] = {0xF0, 0x7D, 0x52, 0x54, 0x30, 1, 0, 0, 1, 0xF7};
+    auto sel = [](int t) {
+      std::vector<uint8_t> b = {2, (uint8_t)t, 46};
+      for (int i = 0; i < 12; ++i) b.push_back('A');
+      auto m = msg(0x49, b);
+      engine_sysex(m.data(), (int)m.size());
+    };
+    auto closes = [] {
+      for (auto& m : sent(0x3A))
+        if (m.size() >= 8 && m[7] == 0) return true;
+      return false;
+    };
+    uint32_t tk = now_ms();
+    // the page `title` open on track `from`, then track `to` selected: closed? (the page closed again after)
+    auto run = [&](const char* title, int from, int to, bool bus = false) {
+      engine_sysex(closed, sizeof closed);
+      sel(from);
+      auto o = msg(0x30, {2, 1, 0});
+      engine_sysex(o.data(), (int)o.size());
+      remote_show_page(title);
+      if (!strcmp(title, "INSERT")) ins_page_set(bus, 0, 0, -1);
+      remote_tick(tk += 50);
+      CHECK(remote_page_title() && !strcmp(remote_page_title(), title));
+      g_out.clear();
+      sel(to);
+      remote_tick(tk += 50);
+      return closes();
+    };
+    for (const char* p : {"INSERT", "SEQ", "ARP", "POLY"}) {
+      CHECK(run(p, 0, 1));    // TRK + SD (the Rytm's synth): back to the Rytm
+      CHECK(!run(p, 0, 2));   // TRK + RS (a Sidecar seq track): stays, on RS
+    }
+    fprintf(stderr, "  trk-sel: SEQ / INSERT / ARP / POLY close on TRK + SD, follow on TRK + RS\n");
+    CHECK(!run("SEQ", 0, 2) && seq::view().track == 2 && !seq::view().prompt);   // SEQ from the ring follows
+    run("ARP", 0, 2);
+    CHECK(remote_page_title() && !strcmp(remote_page_title(), "ARP"));
+    run("POLY", 0, 2);
+    CHECK(poly_page_track() == 2);
+    CHECK(!run("SEQ", 0, 4) && seq::view().track == 4 && seq::view().prompt == seq::kPromptMake &&
+          seq::view().prompt_track == 4);   // a Sidecar track, no seq track: its make prompt
+    engine_sysex(closed, sizeof closed);
+    CHECK(!run("LFO", 0, 1));                 // LFO stays (the Rytm tracks' own modulation too)
+    CHECK(!run("INSERT", 0, 1, true));        // INSERT's BUS view stays
+    // a kit (or pattern) load that moves the selection does the same (pinned: the page closes on a Rytm-synth track)
+    engine_sysex(closed, sizeof closed);
+    sel(0);
+    auto o = msg(0x30, {2, 1, 0});
+    engine_sysex(o.data(), (int)o.size());
+    remote_show_page("ARP");
+    remote_tick(tk += 50);
+    g_out.clear();
+    auto kit = msg(0x3B, {5});
+    engine_sysex(kit.data(), (int)kit.size());
+    sel(1);
+    remote_tick(tk += 50);
+    CHECK(closes());
+    engine_sysex(closed, sizeof closed);
+  }
   printf("%s\n", cmd("seq").c_str());
   printf("test_seq: OK\n");
   return 0;
