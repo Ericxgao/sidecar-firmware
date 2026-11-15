@@ -75,6 +75,50 @@ CORE_COLD void footer(Canvas& c, const char* text, int v, bool bipolar) {
   c.unclip();
 }
 
+CORE_COLD void dotted_h(Canvas& c, int x0, int x1, int y) {
+  for (int x = x0; x <= x1; x += 2) c.pixel(x, y);
+}
+CORE_COLD void dotted_v(Canvas& c, int x, int y0, int y1) {
+  for (int y = y0; y <= y1; y += 2) c.pixel(x, y);
+}
+
+static CORE_COLD void foot_frame(Canvas& c) {
+  c.unclip();
+  c.fill(Rect{0, kFooterY, kW, kFooterH}, kOn);
+  c.vline(67, kFooterY, kFooterY + kFooterH - 1, kOff);
+  c.clear_text(kSlotFoot, 4);
+}
+
+CORE_COLD void footer_keys(Canvas& c, const char* k1, const char* w1, const char* k2, const char* w2) {
+  foot_frame(c);
+  const char* k[2] = {k1, k2};
+  const char* w[2] = {w1, w2};
+  for (int i = 0; i < 2; ++i) {
+    if (!k[i] || !*k[i]) continue;
+    int x = i ? 70 : 2, kw = (int)strlen(k[i]) * kRSmall.advance + 3;
+    c.fill(Rect{(int16_t)x, kFooterY + 1, (int16_t)kw, 7}, kOff);
+    c.put_text(kSlotFoot + i * 2, kRSmall, x + 2, kFooterY + 2, k[i]);
+    if (w[i] && *w[i]) c.put_text(kSlotFoot + i * 2 + 1, kRSmall, x + kw + 2, kFooterY + 2, w[i], kTextInvert);
+  }
+}
+
+CORE_COLD void footer_value(Canvas& c, const char* name, int v, bool bipolar, const char* value) {
+  foot_frame(c);
+  c.put_text(kSlotFoot, kRSmall, 2, kFooterY + 2, name, kTextInvert);
+  int x0 = 4 + (int)strlen(name) * kRSmall.advance, x1 = 64;
+  for (int x = x0; x <= x1; x += 2) c.pixel(x, kFooterY + 2, kOff), c.pixel(x, kFooterY + 6, kOff);
+  for (int y = kFooterY + 2; y <= kFooterY + 6; y += 2) c.pixel(x0, y, kOff), c.pixel(x1, y, kOff);
+  int in = x1 - x0 - 3;
+  v = clamp(v, 0, 127);
+  if (bipolar) {
+    int mid = x0 + 2 + in / 2, at = x0 + 2 + v * in / 127;
+    c.fill(Rect{(int16_t)(at < mid ? at : mid), kFooterY + 3, (int16_t)((at < mid ? mid - at : at - mid) + 1), 3}, kOff);
+  } else {
+    c.fill(Rect{(int16_t)(x0 + 2), kFooterY + 3, (int16_t)(v * in / 127), 3}, kOff);
+  }
+  c.put_text(kSlotFoot + 1, kRSmall, 70, kFooterY + 2, value, kTextInvert);
+}
+
 CORE_COLD int text_lines(Canvas& c, int slot, int n, int x, int y, int dy, const char* s, uint8_t flags) {
   int a = flags & 3;
   int room = a == kAlignLeft ? (kW - x + 1) / kRSmall.advance : a == kAlignRight ? (x + 2) / kRSmall.advance : kW / kRSmall.advance;
