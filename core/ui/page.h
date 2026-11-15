@@ -90,7 +90,7 @@ constexpr int kCoarseStep = 8, kOctaveStep = 12;
 // v moved by `step` counts (signed, unclamped result; the caller clamps) as encoder e (A..H, 8 DATA) with its detent at
 // `neutral`; key names the parameter (a page's cell, any address that is the parameter's alone: moving to another one
 // starts the detent over)
-int detent_step(int e, const void* key, int v, int step, int neutral);
+int detent_step(int e, const void* key, int v, int step, int neutral, bool coarse = false);   // coarse (FUNC): leaves the centre whole
 void detent_scope(int scope);   // whose parameters the next detent_step calls are (the voice shown): another one starts it over
 void detent_reset();            // tests, remote_reset
 inline const void* detent_tag(int id) { return (const void*)(intptr_t)(id + 1); }   // a code page's parameter, by a number of its own

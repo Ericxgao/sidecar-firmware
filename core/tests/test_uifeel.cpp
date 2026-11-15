@@ -107,6 +107,10 @@ static void test_func_coarse() {
   at(g_us + 1000);
   turn(6, -1, true);
   CHECK(v[0].p[6] == 40);
+  // a fast turn without FUNC (8 counts in a report) still holds at the centre
+  plaits_page(64);
+  turn(6, 8);
+  CHECK(v[0].p[6] == 64 + 8 - kDetentCounts);
   // an octave from the centre is an octave (the detent does not eat its counts), and the other direction too
   plaits_page(64);
   turn(6, 1, true);

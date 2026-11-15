@@ -297,7 +297,7 @@ CORE_COLD void ins_enc(int e, int d, bool func) {
     int ch = chain_now();
     if (e < ins::kEqParams) {
       const int cur = ins::eq_param(ch, e), st = d * (func ? 8 : 1);   // LOW / HIGH: 64 is flat, the detent
-      ins::set_eq(ch, e, e >= 2 ? detent_step(e, detent_tag(0x100 + ch * 8 + e), cur, st, 64) : cur + st), mod::manual_knob(mod::tid(mod::kIns, ch, 8 + e));
+      ins::set_eq(ch, e, e >= 2 ? detent_step(e, detent_tag(0x100 + ch * 8 + e), cur, st, 64, func) : cur + st), mod::manual_knob(mod::tid(mod::kIns, ch, 8 + e));
     }
     else if (e == 6) {
       if (func && !ip.bus) ip.track = clampi(track_now() + l, 0, 11), ip.manual = true;
@@ -310,7 +310,7 @@ CORE_COLD void ins_enc(int e, int d, bool func) {
     if (e == 0) out::set_route(vi, clampi(out::control.route[vi] + l, 0, out::kRoutes - 1));
     else if (e <= 3 || (e == 4 && dsp_sample_now())) {
       const int cur = out::param(vi, e - 1), st = d * (func ? 8 : 1);   // C PAN: 64 is the centre, the detent
-      out::set_param(vi, e - 1, e == 2 ? detent_step(e, detent_tag(0x200 + vi), cur, st, 64) : cur + st);
+      out::set_param(vi, e - 1, e == 2 ? detent_step(e, detent_tag(0x200 + vi), cur, st, 64, func) : cur + st);
       if (e <= 3) mod::manual_knob(mod::tid(mod::kOut, vi, e - 1));
     }
     return;
@@ -319,7 +319,7 @@ CORE_COLD void ins_enc(int e, int d, bool func) {
   if (e < 4) {
     if (t) {
       const int cur = ins::param(ch, ip.slot, e), st = d * (func ? 8 : 1);   // AMP / SAT TONE (P3): 64 is flat, the detent
-      ins::set_param(ch, ip.slot, e, e == 2 && (t == ins::kAmp || t == ins::kSat) ? detent_step(e, detent_tag(0x300 + ch * 8 + ip.slot), cur, st, 64) : cur + st);
+      ins::set_param(ch, ip.slot, e, e == 2 && (t == ins::kAmp || t == ins::kSat) ? detent_step(e, detent_tag(0x300 + ch * 8 + ip.slot), cur, st, 64, func) : cur + st);
       mod::manual_knob(mod::tid(mod::kIns, ch, ip.slot * 4 + e));
     }
     return;

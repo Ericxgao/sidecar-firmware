@@ -156,14 +156,14 @@ CORE_COLD void detent_reset() {
   for (Detent& d : detents) d = Detent();
 }
 
-CORE_COLD int detent_step(int e, const void* key, int v, int step, int neutral) {
+CORE_COLD int detent_step(int e, const void* key, int v, int step, int neutral, bool coarse) {
   Detent& d = detents[e < 0 || e > 8 ? 8 : e];
   if (!step) return v;
   if (v == neutral) {   // held on the centre (landed there, or found there): the turns push into the detent
     const uint32_t now = now_ms();
     if (d.key != key || d.scope != g_scope || now - d.ms >= kDetentIdleMs) d.key = key, d.scope = g_scope, d.acc = 0;
     d.ms = now;
-    if (step >= kCoarseStep || step <= -kCoarseStep) {   // FUNC: a coarse step leaves the centre whole (a tune's octave stays one)
+    if (coarse) {   // FUNC: a coarse step leaves the centre whole (a tune's octave stays one)
       d.key = nullptr, d.acc = 0;
       return neutral + step;
     }
@@ -204,7 +204,7 @@ CORE_COLD int step_value(const Page& p, int param, int v, int delta, bool func) 
     }
   // FUNC: a coarse step, 1/16 of the range; a tune (the encoder labelled TUN, in semitones) an octave
   const int step = delta * (!func ? 1 : e < 8 && !strcmp(p.label[e], "TUN") ? kOctaveStep : kCoarseStep);
-  v = centred ? detent_step(e, centred, v, step, 64) : v + step;
+  v = centred ? detent_step(e, centred, v, step, 64, func) : v + step;
   return v < 0 ? 0 : v > 127 ? 127 : v;
 }
 

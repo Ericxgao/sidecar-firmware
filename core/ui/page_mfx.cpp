@@ -129,7 +129,7 @@ CORE_COLD void mfx_enc(int e, int d, bool func) {
   if (mp.eq) {
     if (e < ins::kEqParams) {
       const int cur = ins::eq_param(master::kEqChain, e);   // LOW / HIGH: 64 is flat, the detent
-      ins::set_eq(master::kEqChain, e, e >= 2 ? detent_step(e, detent_tag(0x400 + e), cur, d * st, 64) : cur + d * st), mod::manual_knob(mod::tid(mod::kIns, master::kEqChain, 8 + e));
+      ins::set_eq(master::kEqChain, e, e >= 2 ? detent_step(e, detent_tag(0x400 + e), cur, d * st, 64, func) : cur + d * st), mod::manual_knob(mod::tid(mod::kIns, master::kEqChain, 8 + e));
     }
     else if (e == 7) master::set_lev(master::control.lev + d * st), mod::manual_knob(mod::tid(mod::kMfx, 0, 0));
     return;
@@ -138,7 +138,7 @@ CORE_COLD void mfx_enc(int e, int d, bool func) {
   if (e < 4) {
     if (t) {
       const int cur = ins::param(ch, s, e);   // AMP / SAT TONE (P3): 64 is flat, the detent
-      ins::set_param(ch, s, e, e == 2 && (t == ins::kAmp || t == ins::kSat) ? detent_step(e, detent_tag(0x500 + ch * 8 + s), cur, d * st, 64) : cur + d * st);
+      ins::set_param(ch, s, e, e == 2 && (t == ins::kAmp || t == ins::kSat) ? detent_step(e, detent_tag(0x500 + ch * 8 + s), cur, d * st, 64, func) : cur + d * st);
       mod::manual_knob(mod::tid(mod::kIns, ch, s * 4 + e));
     }
   } else if (e == 4) {
