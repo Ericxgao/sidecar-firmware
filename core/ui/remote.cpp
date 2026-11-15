@@ -1946,10 +1946,12 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 #if CORE_POLY
         if (moved) seq::selected_track(b[1]), core::poly::selected_voice(remote_track_voice(b[1]));   // rui1040: the SEQ page
                                                   // follows the selection; the pads' binding too
-        // 0.5.0 (owner: "Follow, never close"; a plain pad press selects its track too, 49 1 2): the track pages (SEQ,
-        // INSERT's track view, ARP, POLY) follow the selection, also to a track of the Rytm's own synth, which each
-        // page shows in its own way (SEQ its plain page, no prompt; INSERT its footer, ARP and POLY their analog screens).
-        // No selection closes a page. (A pattern or kit load that moves the selection does the same.)
+        // 0.5.0: the track pages INSERT's track view, ARP and POLY follow the selection (a plain pad press selects its
+        // track too, 49 1 2), also to a track of the Rytm's own synth, which each shows in its own way (INSERT its footer,
+        // ARP and POLY their analog screens): "follow, never close". SEQ is the one that closes (owner 2026-11-15): on a
+        // selection of a track that is no poly track seq::selected_track asks the Rytm to close it (3A 0 0), so the user
+        // edits that track's own trigs; a poly track still follows. (A pattern or kit load that moves the selection does
+        // the same.)
 #endif
         disp.info_gen = disp.info_gen + 1;
         return;
