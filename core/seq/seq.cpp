@@ -4717,18 +4717,20 @@ CORE_COLD void selected_track(int t) {
     ui.track = t, ui.page = 0, ui.prompt = 0;
     return;
   }
-  // 0.5.0 (a selection on an open page; owner: whoever opened it, TRK + TRIG, seq mode, the ring, UP + T2; "Follow, never
-  // close"): the SEQ page follows to that track and shows it as it is, a track that is no poly track in its plain state
-  // (NOT SEQUENCED, the footer how to make one or why not). Owner 2026-11-15: "I just want it to switch to that track, no
-  // dialog about making it a poly track": a selection never asks; making it one stays B turned up (or TRK + TRIG's
-  // own prompt, an explicit open)
+  // Owner 2026-11-15 (hardware testing): a selection of a track that is no poly track (TRK + pad, a plain pad press; a
+  // Sidecar track with no poly track, or a track of the Rytm's own synth) CLOSES the SEQ page, whoever opened it (TRK +
+  // TRIG, seq mode, the ring, UP + T2): "they just want to edit that tracks trigs, seq or not". The page asks the Rytm to
+  // close (3A 0 0, as every page leaves); its 30 0 0 comes back and books TRK's release (remote.cpp), so TRK is never left
+  // held. A poly track follows (above). INSERT, ARP and POLY follow, never close (remote.cpp). An explicit open on a track
+  // that is no poly track (TRK + TRIG, UP + T2) keeps its make / explain prompt: only a selection closes.
   if (!seq_shown()) return;
-  if (seqmode) {   // seq mode's page: the Rytm leaves seq mode on a track that is no seq track (its 08 0 follows, then
-    if (ui.ne) ne_leave();   // closing nothing); the page stays on that track, closed by NO as TRK + TRIG's is
+  if (seqmode) {   // seq mode's page: the Rytm leaves seq mode on a track that is no seq track (its 08 0 follows)
+    if (ui.ne) ne_leave();
     seqmode = false;
-    if (we_opened) we_opened = false, ui.view_opened = true;
   }
-  ui.track = t, ui.page = 0, ui.prompt = 0;
+  we_opened = false, ui.view_opened = false, ui.prompt = 0;
+  ui::remote_request(false);
+  log(CORE_STR("seq: track %d selected (no poly track): the SEQ page closed"), t + 1);
 }
 CORE_COLD void page_closed() {
   if (!cur) reset();
