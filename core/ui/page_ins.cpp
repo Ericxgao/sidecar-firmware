@@ -283,7 +283,7 @@ CORE_COLD void ins_draw(Canvas& c, int page, int npages, uint32_t ms) {
     sniprintf(b, sizeof b, CORE_STR("SEND FX %d OFF: SILENT"), ip.busel + 1);
     footer(c, b);
   } else if (!ip.bus && remote_track_machine(tr) == 0x7F) {
-    footer(c, "ANALOG TRACK: NO SIDECAR VOICE");
+    footer(c, "NO SIDECAR VOICE ON TRACK");   // (the Rytm's own synth; 25 characters fit)
   } else {
     footer(c, ip.bus ? "NO: TRACK  RIGHT: EQ" : "YES: BUSES  RIGHT: EQ");
   }

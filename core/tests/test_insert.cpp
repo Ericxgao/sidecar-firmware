@@ -1006,6 +1006,15 @@ int main() {
     ui::ins_page_set(false, 0, 0, 0);
     ui::Canvas c;
     CHECK(ui::remote_render(6 + k, 0, nullptr, c));
+    {   // SD on the Rytm's own synth (33: machine 7F): its footer fits the screen (check.h's TEXT-FIT at exit)
+      std::vector<uint8_t> m = {0xF0, 0x7D, 0x52, 0x54, 0x33, 1, 0, 12};
+      for (int t = 0; t < 12; ++t) m.push_back(t == 1 ? 0x7F : 46), m.push_back(t == 1 ? 0x7F : 0x48);
+      m.push_back(0xF7);
+      ui::remote_sysex(m.data(), (int)m.size());
+      ui::ins_page_set(false, 0, 0, 1);
+      CHECK(ui::remote_render(6 + k, 0, nullptr, c));
+      ui::ins_page_set(false, 0, 0, 0);
+    }
     ui::extra_page(k).enc(0, 5, false);   // A: CUT +5
     CHECK(ins::param(0, 0, 0) == 85);
     ui::extra_page(k).enc(5, 1, false);   // F: TYPE +1 -> CRUSH (its defaults)
