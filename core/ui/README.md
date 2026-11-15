@@ -43,8 +43,9 @@ pages.cpp); continuous values keep the counts and FUNC x 8.
 
 - The first report after 300 ms of rest (`kListRestMs`) steps at once, whatever its size: a nudge is never lost. Not
   on a small list (2 to 8 values, `kListSmall`, when the caller passes the size: the voice pages' lists, the SEQ track
-  pages' DIR SPD QNT RNG WGHT MODE SQNT SAFF and the track switch): there the first entry takes `kListCounts` counts
-  too, so a touch does not flip a switch or move SPD (0.5.0 stopgap).
+  pages' DIR SPD QNT RNG WGHT MODE SQNT SAFF, the track switch, QNT and FOLW): there the first entry takes
+  `kListCounts` counts too, so a touch does not flip a switch or move SPD (0.5.0 stopgap). The other pages give no size
+  yet and keep the step at once.
 - While turning, one entry every 6 counts (`kListCounts`, stock's enums; 4 before 0.5.0), at most one every 60 ms
   (`kListGapMs`); the counts over a step are dropped, so a hard turn walks the list and skips nothing. The gap is a
   little under the report period: it holds back only reports that bunch up, and such a report's counts wait for the

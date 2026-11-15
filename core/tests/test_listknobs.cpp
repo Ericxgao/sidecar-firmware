@@ -350,11 +350,23 @@ static void test_seq_page() {
     CHECK(t->speed == seq::speed_step(sp, 1, false));
     detent(kSeqPage, 5, -1);
     CHECK(t->speed == sp);
+    rest(), kSeqPage.enc(5, 1, true);   // FUNC: all ten ratios, a longer list: a touch steps at once, as before
+    CHECK(t->speed == seq::speed_step(sp, 1, true));
+    flick(kSeqPage, 5, -1);
   }
   seq::ui_key(0x30, true, true), seq::ui_key(0x30, false, true);
   one_entry(kSeqPage, 0), one_entry(kSeqPage, 1);
   seq::ui_key(0x30, true, true), seq::ui_key(0x30, false, true);
   one_entry(kSeqPage, 2), one_entry(kSeqPage, 3);
+  {   // RANDOM's WGHT (6 values): a touch after a rest changes nothing
+    seq::Track* t = seq::edit_track(0, false);
+    const int w = t->rnd_wght;
+    rest(), kSeqPage.enc(2, 2, false);
+    CHECK(t->rnd_wght == w);
+    detent(kSeqPage, 2, 1);
+    CHECK(t->rnd_wght == w + 1);
+    low(kSeqPage, 2);
+  }
   seq::ui_key(0x30, true, true), seq::ui_key(0x30, false, true);
   // a held trig: TRIG's COND a long list, CHD, INV a list
   seq::ui_key(0, true, true);

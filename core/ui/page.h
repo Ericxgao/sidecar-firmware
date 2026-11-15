@@ -85,8 +85,9 @@ bool is_list(const Page& p, int param);   // a kList cell's parameter
 // nothing about entries. list_turn: -1, 0 or +1, the entries to move for this report of encoder e (A..H, 8 DATA); call it
 // once a report, whatever the page does with it. The first report after a rest steps at once, whatever its size, then one
 // entry every kListCounts counts, at most one every kListGapMs; a reversal starts its count over, so a jittering knob does
-// not bounce. n: the list's size when the caller knows it; a small list (2..kListSmall values: switches, SPD, DIR ...)
-// has no step at once after a rest, its first entry takes kListCounts counts too, so a touch does not change it. Clamp the result, never wrap. list_turn_long: for long lists, as list_turn, x kListFast when the report
+// not bounce. Clamp the result, never wrap. n: the list's size when the caller knows it (0: not given); a small list
+// (2..kListSmall values: switches, SPD, DIR ...) has no step at once after a rest, its first entry takes kListCounts
+// counts too, so a touch does not change it. list_turn_long: for long lists, as list_turn, x kListFast when the report
 // holds kListFastCounts or more (a spin); FUNC's jump stays the page's.
 constexpr int kListCounts = 6;       // one entry: stock's enums (0.5.0 stopgap, was 4: a 4-value list moved too easily)
 constexpr int kListSmall = 8;        // up to this many values: no step at once after a rest

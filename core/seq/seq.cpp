@@ -3926,7 +3926,7 @@ CORE_COLD bool ui_key(int code, bool down, bool shown) {
 CORE_COLD int enc_list_n(int e, bool func, bool shown) {
   if (!shown || ui.held || ui.ne) return 0;
   switch (ui.tv) {
-    case kTvNotes: return e == 1 ? 2 : 0;                                // the track on / off
+    case kTvNotes: return e == 1 || e == 3 || e == 4 ? 2 : 0;            // the track on / off, QNT, FOLW
     case kTvDefaults: return e == 4 ? kDirs : e == 5 ? (func ? kSpeeds : 7) : 0;   // DIR, SPD (FUNC: all ten)
     case kTvScale: return e == 2 ? kQnts : 0;                            // QNT (KEY 12, SCL: as before)
     case kTvRandom:                                                      // RNG, WGHT, MODE, SQNT, SAFF
