@@ -783,7 +783,10 @@ CORE_COLD bool up_right_fill() {
 #if CORE_POLY
   if (!s.up_down && !keys_map_on() && !s.map_over) return false;
   const ExtraPage* x = extra_of(s.voice);
-  if (x && !strcmp(x->title, "FILL")) return false;
+  if (x && !strcmp(x->title, "FILL")) {   // FILL's own UP + RIGHT (it closes), also when UP went down before FILL opened
+    if (x->key) x->key(kKeyUp);           // (its press never reached FILL: the map's, or held over the open)
+    return false;
+  }
   fill_page_open(-1);   // (UP's release then leaves FILL up: the map's end closes or restores only KEYS)
   return true;
 #else
@@ -1985,6 +1988,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       lfo::kit_changed(b[0]);
       if (b[0] != kit_said) {  // (a 3B also comes with every page open and hello: the same kit is no change)
         kit_said = b[0];
+        for (int t = 0; t < 12; ++t) s.src14[t] = -1;   // 0.5.0: the old kit's SMP / TBL / SRC / INST (its 2As come again)
         page_two_cancel();     // rc5: a kit loaded around a list choice: its machines and words are the kit's
 #if CORE_MSAMP
         midim::kit_switched(); // MIDI: its held notes off; the new kit's PRG and the rest go out at its reports
@@ -2436,7 +2440,13 @@ CORE_COLD int remote_track_write_answer(int t, int k) {
 }
 CORE_COLD int remote_track_src14(int t) { return t >= 0 && t < 12 ? s.src14[t] : -1; }
 CORE_COLD int remote_track_src14_fresh(int t) {
-  return t >= 0 && t < 12 && s.src14[t] >= 0 && s.src14_at[t] > s.rep_at[kTrackVoice[t]] ? s.src14[t] : -1;
+  if (t < 0 || t >= 12 || s.src14[t] < 0) return -1;
+  // a voice shared with another track of ours on the same machine: its report may be that track's, src14 is this one's
+  for (int u = 0; u < 12; ++u)
+    if (u != t && have_tracks && kTrackVoice[u] == kTrackVoice[t] && track_vb[u] != kNotOurs && track_vb[t] != kNotOurs &&
+        machine_of(track_vb[u]) == machine_of(track_vb[t]))
+      return s.src14[t];
+  return s.src14_at[t] > s.rep_at[kTrackVoice[t]] ? s.src14[t] : -1;
 }
 CORE_COLD int remote_track_src_value(int t, int k) {
   return t >= 0 && t < 12 && k >= 0 && k < 16 && (s.src_known[t] >> k & 1) ? s.srcv[t][k] : -1;

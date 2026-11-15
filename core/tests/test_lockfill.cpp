@@ -1175,6 +1175,23 @@ int main() {
         send(msg(0x49, {4, 0}));
         ticks(4);
         CHECK(fill_shown(t) && !asked(0));
+        // review: FILL opened with UP still held (the map's), a second RIGHT with UP still held closes it (the combo toggles)
+        send(msg(0x30, {0, 0, 0}));
+        ui::fill_page_reset();
+        ticks(1);
+        send(msg(0x49, {4, 1}));
+        send(msg(0x30, {0, 1, 1}));
+        ticks(1);
+        send(msg(0x31, {0, 0x41, 1}));
+        send(msg(0x31, {0, 0x41, 0}));
+        ticks(1);
+        CHECK(fill_shown(t));
+        send(msg(0x31, {0, 0x41, 1}));
+        send(msg(0x31, {0, 0x41, 0}));
+        ticks(1);
+        CHECK(!ui::fill_page_view().on);
+        send(msg(0x49, {4, 0}));
+        ticks(2);
         // the page open: SIDECAR, then a ring page (LFO); without and with UP's map over it
         for (int via : {0, 1})
           for (bool map : {false, true}) {

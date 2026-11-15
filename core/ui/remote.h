@@ -223,7 +223,7 @@ bool remote_track_write(int t, int k, int value, int lo, int flags);
 int remote_track_write_answer(int t, int k);
 int remote_track_src14(int t);
 // 0.5.0: src14 when the Rytm's 2A said it after the last report of the track's voice (a pick or a turn on an idle
-// voice), else -1
+// voice; on a voice shared with another track of ours on the same machine, whenever known), else -1
 // (the voice's report is the newer word: its own state). SAMPLE EDIT's sample (sedit::open_track).
 int remote_track_src14_fresh(int t);
 // 1027e: track t's P(k+1) as the SRC view draws it (the Rytm's 2A; -1 none yet)

@@ -4724,7 +4724,7 @@ CORE_COLD void selected_track(int t) {
   // own prompt, an explicit open)
   if (!seq_shown()) return;
   if (seqmode) {   // seq mode's page: the Rytm leaves seq mode on a track that is no seq track (its 08 0 follows, then
-    if (ui.ne) ne_leave();   // closing nothing); the page stays with the prompt, closed by NO as TRK + TRIG's is
+    if (ui.ne) ne_leave();   // closing nothing); the page stays on that track, closed by NO as TRK + TRIG's is
     seqmode = false;
     if (we_opened) we_opened = false, ui.view_opened = true;
   }

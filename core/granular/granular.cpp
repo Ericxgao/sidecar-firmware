@@ -744,6 +744,7 @@ CORE_COLD void kit_src(int vi, int e) {
   vp[vi][0] = (float)(e & 127) + (float)srclib::lo_of(e) / 128.0f;
   set_knobs(vi);
   select(vi);
+  pools::seen(pools::kSamples, knobs[vi].src);   // (the used set, as a report)
 }
 CORE_COLD int entry_lib(int e) { return list && e >= 0 && e < nlist ? list[e].lib : srclib::kLibOff; }
 CORE_COLD void preview(int vi, int e) {

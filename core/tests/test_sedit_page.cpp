@@ -582,9 +582,30 @@ static void t_sampler_idle_pick() {
   run();
   CHECK(vw().st == sedit::kReady && vw().frames == kN / 4);
   cmd_close();
+  // a report after the 2A (the voice played): its SMP is the newer word
+  dsp_report(1, 8, 0);
+  CHECK(ui::remote_track_src14_fresh(4) == -1 && sedit::open_track(4) == 0);
+  run();
+  CHECK(vw().st == sedit::kReady && vw().frames == kN / 2);   // A008 (the report's), not B002 (the older 2A)
+  cmd_close();
+  // a kit change: the old kit's SMP is forgotten until its 2A comes again
+  from_rytm({0x2A, 1, 4, 10, 1, 2, 1 << 4});
+  CHECK(ui::remote_track_src14_fresh(4) >= 0);
+  from_rytm({0x3B, 1, 9});
+  CHECK(ui::remote_track_src14(4) == -1);
   from_rytm({0x30, 1, 0, 0, 0});
   from_rytm({0x33, 1, 4, 1, 49, 0x7F});
   CHECK(ui::remote_track_src14(4) == -1);   // (another machine: its knob is no SMP)
+  // a voice shared by two SAMPLER tracks (RS and CP, voice 7): CP's trig reports on the voice after RS's pick; RS's
+  // edit still opens RS's pick (the report may be CP's)
+  from_rytm({0x33, 1, 2, 2, kRytmSampler, (uint8_t)(kDspSample | 7), kRytmSampler, (uint8_t)(kDspSample | 7)});
+  from_rytm({0x2A, 1, 2, 10, 1, 8, 0});   // RS: A008
+  dsp_report(7, 2, 1 << 4);               // the voice: B002 (CP's trig)
+  CHECK(ui::remote_track_src14_fresh(2) == (8 << 7) && sedit::open_track(2) == 0);
+  run();
+  CHECK(vw().st == sedit::kReady && vw().frames == kN / 2);   // A008
+  cmd_close();
+  from_rytm({0x33, 1, 2, 2, 0, 0x7F, 0, 0x7F});
   for (int i = 0; i < 20; ++i) pass();
   printf("sedit page: SAMPLER - a pool pick on an idle voice (2A) opens in SAMPLE EDIT with no trig\n");
 }

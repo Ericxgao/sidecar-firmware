@@ -1956,6 +1956,7 @@ CORE_COLD void kit_src(int vi, int e) {
   if (!job || !list || e < 0 || e >= nlist) return;
   vp[vi][0] = (float)(e & 127) + (float)srclib::lo_of(e) / 128.0f;
   select(vi);
+  pools::seen(pools::kInstr, e);   // (the used set, as a report)
 }
 
 CORE_COLD void silence(int vi) {
