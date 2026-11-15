@@ -85,6 +85,8 @@ bool is_list(const Page& p, int param);   // a kList cell's parameter
 // 0) that crosses or lands on the neutral stops there; the next turns leave it only once they have travelled
 // kDetentCounts counts further (a reversal gives the travel back), then move on by the rest.
 constexpr int kDetentCounts = 3;
+// FUNC + turn: a coarse step (1 / 16 of a 0..127 range; an octave of semitones on a tune)
+constexpr int kCoarseStep = 8, kOctaveStep = 12;
 // v moved by `step` counts (signed, unclamped result; the caller clamps) as encoder e (A..H, 8 DATA) with its detent at
 // `neutral`; key names the parameter (a page's cell, any address that is the parameter's alone: moving to another one
 // starts the detent over)

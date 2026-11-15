@@ -85,6 +85,34 @@ static void test_detent() {
   CHECK(v[0].p[6] == 64);
 }
 
+// ---- 2: FUNC + turn, a coarse step: 8 (1/16 of the range) on a 0..127 knob, a zone on a list, an octave on a tune
+static void test_func_coarse() {
+  plaits_page(40);
+  turn(1, 1, true);
+  CHECK(v[0].p[1] == 45 + 8);    // HRM
+  turn(1, -2, true);
+  CHECK(v[0].p[1] == 45 + 8 - 16);
+  turn(7, 1, true);
+  CHECK(v[0].p[7] == 45 + 8);    // LEV, a bar
+  const int z = eng_zone(v[0].p[0], 17);
+  at(g_us + 1000000);
+  turn(0, 1, true);
+  CHECK(eng_zone(v[0].p[0], 17) == z + 1);   // ENG, a list: the next zone, never 8
+  at(g_us + 1000000);
+  turn(0, -3, true);
+  CHECK(eng_zone(v[0].p[0], 17) == z);
+  turn(6, 1, true);
+  CHECK(v[0].p[6] == 40 + 12);   // TUN: an octave
+  at(g_us + 1000);
+  turn(6, -1, true);
+  CHECK(v[0].p[6] == 40);
+  // the REC page's playback level (knob D) as well
+  remote_play(PlayInfo{});
+  PlayInput in;
+  kRecPage.enc(3, 5, true);
+  CHECK(remote_play_take(&in) && in.level == 40);
+}
+
 // the code pages take the same detent: the LFO page's DEPTH (knob D of its main view, -64..63, 0 none)
 static void test_detent_lfo() {
   lfo_page_reset();
@@ -109,7 +137,7 @@ int main() {
   hooks.to_rytm = out;
   at(g_us);
   CHECK(engine_begin());
-  struct { const char* name; void (*fn)(); } tests[] = {{"detent", test_detent}, {"detent_lfo", test_detent_lfo}};
+  struct { const char* name; void (*fn)(); } tests[] = {{"detent", test_detent}, {"detent_lfo", test_detent_lfo}, {"func", test_func_coarse}};
   for (auto& t : tests) printf("-- %s\n", t.name), fflush(stdout), t.fn();
   remote_reset();
   system((std::string("rm -rf '") + tmpl + "'").c_str());

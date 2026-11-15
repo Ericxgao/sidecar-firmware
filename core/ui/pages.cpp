@@ -187,7 +187,8 @@ CORE_COLD int step_value(const Page& p, int param, int v, int delta, bool func) 
       e = i;
       break;
     }
-  const int step = delta * (func ? 8 : 1);
+  // FUNC: a coarse step, 1/16 of the range; a tune (the encoder labelled TUN, in semitones) an octave
+  const int step = delta * (!func ? 1 : e < 8 && !strcmp(p.label[e], "TUN") ? kOctaveStep : kCoarseStep);
   v = centred ? detent_step(e, centred, v, step, 64) : v + step;
   return v < 0 ? 0 : v > 127 ? 127 : v;
 }
