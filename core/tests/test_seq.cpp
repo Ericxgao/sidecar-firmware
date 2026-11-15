@@ -3014,6 +3014,30 @@ int main() {
     CHECK(!run("SEQ", 0, 4) && seq::view().track == 4 && seq::view().prompt == seq::kPromptMake &&
           seq::view().prompt_track == 4);   // a Sidecar track, no seq track: its make prompt
     engine_sysex(closed, sizeof closed);
+    // SEQ opened by TRK + TRIG (view_request) or by seq mode (REC on a seq track) follows the same way (owner, 0.5.0):
+    // a Sidecar track that is no seq track: its make prompt, no close; a track of the Rytm's own synth: closed
+    for (int opener = 0; opener < 2; ++opener)
+      for (int to : {4, 1}) {
+        engine_sysex(closed, sizeof closed);
+        sel(0);
+        auto oo = msg(0x30, {2, 1, 0});
+        engine_sysex(oo.data(), (int)oo.size());
+        if (opener == 0) seq::view_request(0);
+        else seqmode_enter(0);
+        remote_show_page("SEQ");
+        remote_tick(tk += 50);
+        CHECK(remote_page_title() && !strcmp(remote_page_title(), "SEQ") && seq::view().track == 0);
+        g_out.clear();
+        sel(to);
+        remote_tick(tk += 50);
+        if (to == 4) CHECK(!closes() && seq::view().track == 4 && seq::view().prompt == seq::kPromptMake);
+        else CHECK(closes());
+        if (opener == 1) {   // the Rytm's 08 0 (REC now on a track that is no seq track): the prompt stays
+          direct_state({8, 0, 0x7F}), seq::tick(now_ms() + 160);
+          if (to == 4) CHECK(!closes() && !seq::view().seqmode && seq::view().prompt == seq::kPromptMake);
+        }
+      }
+    engine_sysex(closed, sizeof closed);
     CHECK(!run("LFO", 0, 1));                 // LFO stays (the Rytm tracks' own modulation too)
     CHECK(!run("INSERT", 0, 1, true));        // INSERT's BUS view stays
     // a kit (or pattern) load that moves the selection does the same (pinned: the page closes on a Rytm-synth track)

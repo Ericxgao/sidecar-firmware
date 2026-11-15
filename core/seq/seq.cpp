@@ -4713,15 +4713,16 @@ CORE_COLD void selected_track(int t) {
     ui.track = t, ui.page = 0;
     return;
   }
-  if ((ui.view_opened || we_opened) && ui::remote_open()) {
-    ui.view_opened = false, we_opened = false;
-    ui::remote_request(false);
-    log(CORE_STR("seq: track %d selected (no seq track): the SEQ page closed"), t + 1);
-    return;
+  // 0.5.0 (TRK + pad on an open page; owner: whoever opened it, TRK + TRIG, seq mode, the ring, UP + T2): the SEQ page
+  // follows with that track's make or explain prompt, as TRK + TRIG would (a track on the Rytm's own synth: remote.cpp
+  // closes the page; NO on a prompt TRK + TRIG opened closes it as before)
+  if (!seq_shown()) return;
+  if (seqmode) {   // seq mode's page: the Rytm leaves seq mode on a track that is no seq track (its 08 0 follows, then
+    if (ui.ne) ne_leave();   // closing nothing); the page stays with the prompt, closed by NO as TRK + TRIG's is
+    seqmode = false;
+    if (we_opened) we_opened = false, ui.view_opened = true;
   }
-  // 0.5.0 (TRK + pad on an open page): the SEQ page shown otherwise (the ring, UP + T2) follows with that track's make
-  // or explain prompt, as TRK + TRIG would (a track on the Rytm's own synth: remote.cpp closes the page)
-  if (seq_shown()) ui.track = t, ui.page = 0, ui.prompt = can_seq(t) == 1 ? kPromptMake : kPromptExplain, ui.prompt_track = t;
+  ui.track = t, ui.page = 0, ui.prompt = can_seq(t) == 1 ? kPromptMake : kPromptExplain, ui.prompt_track = t;
 }
 CORE_COLD void page_closed() {
   if (!cur) reset();
