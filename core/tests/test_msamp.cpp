@@ -22,6 +22,7 @@
 #include "host_link.h"
 #include "msamp/cardq.h"
 #include "msamp/msamp.h"
+#include "ui/remote.h"
 #include "fx/out.h"
 #include "pool/stream_budget.h"
 #include "poly.h"
@@ -387,6 +388,28 @@ static void test_list_and_load() {
   CHECK(voice_slot(1) < 0 && voice_notes(1) == 0);
   for (int v = 0; v < kVoices; ++v) msamp::silence(v);
   render(400);
+}
+
+// 0.5.0 (owner 2026-11-15, the same gap as WAVETABLE's): an instrument picked on an idle MULTISAMPLE voice reaches the
+// host as the SRC view's 2A (P1) only; it loads and the voice selects it with no note
+static void test_idle_pick() {
+  const int t = 4, vi = ui::remote_track_voice(t);   // BT: voice 1
+  CHECK(vi == 1);
+  send({0xF0, 0x7D, 0x52, 0x54, 0x33, 1, (uint8_t)t, 1, 46, (uint8_t)(kMultiMachine | vi), 0xF7});   // the machine chosen
+  send(report(0x03, kMultiMachine | vi, -1, 0, ms(0)));   // its first report: INST OFF
+  render(20);
+  CHECK(voice_slot(vi) < 0);
+  int e = entry("SidecarTest.sfz");
+  uint32_t trigs = stats().trigs;
+  send({0xF0, 0x7D, 0x52, 0x54, 0x29, 1, (uint8_t)t, 1, 0xF7});
+  send({0xF0, 0x7D, 0x52, 0x54, 0x2A, 1, (uint8_t)t, 0, 1, (uint8_t)(e & 127), (uint8_t)srclib::lo_of(e), 0xF7});
+  restart();
+  render(40);
+  CHECK(voice_slot(vi) >= 0 && stats().trigs == trigs);
+  send({0xF0, 0x7D, 0x52, 0x54, 0x33, 1, (uint8_t)t, 1, 0, 0x7F, 0xF7});
+  for (int v = 0; v < kVoices; ++v) msamp::silence(v);
+  render(100);
+  printf("test_msamp: an instrument picked on an idle voice (2A) loads with no note\n");
 }
 
 // A sequenced chord (core/seq: poly::seq_on per note -> msamp::live_on) as the very first trig on a voice whose
@@ -1039,6 +1062,7 @@ int main() {
   }
   render(400);   // the list
   test_list_and_load();
+  test_idle_pick();
   test_seq_chord_before_load();
   test_play();
   test_short_trig();

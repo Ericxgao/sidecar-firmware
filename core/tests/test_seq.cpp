@@ -23,6 +23,7 @@
 #include "fx/insert.h"
 #include "fx/send_fx.h"
 #include "machines.h"
+#include "md/md.h"
 #include "mod/rytm_param.h"
 #include "keys.h"
 #include "poly.h"
@@ -1655,6 +1656,61 @@ int main() {
     cmd("seq=track:6:off");
     engine_sysex(closed, sizeof closed);
   }
+  // ---- LOCK SMPL on a poly track playing MD (0.5.0 spd-enc): the knob labels are voice_label's (MD's own P9..P16), not "-"
+  {
+    direct_state({2, 0, 0x7F});
+    while (seq::idle()) {}
+    const uint8_t o[] = {0xF0, 0x7D, 0x52, 0x54, 0x30, 1, 0x10, 1, 0, 0xF7};
+    engine_sysex(o, sizeof o);
+    seq::view_set(0, 0, -1, false);
+    seq::Track* bt = seq::edit_track(0, true);
+    for (seq::Step& x : bt->step) x.n = 0, x.nl = 0;
+    bt->length = 16;
+    seq::add_note(bt->step[2], {64, 100, 48, 0, 0});
+    report(kMd | 0, {0, 40, 64, 64, 64, 64, 64, 64, 64, 64, 0, 0, 0, 0, 0, 100});
+    const uint8_t toMd[] = {0xF0, 0x7D, 0x52, 0x54, 0x33, 1, 0, 1, 5, (uint8_t)(kMd | 0), 0xF7};   // track 0 (BD): MD
+    engine_sysex(toMd, sizeof toMd);
+    CHECK(remote_track_machine(0) == (kMd | 0) && md::label(0, 8));
+    key(2, true);
+    key(0x32, true), key(0x32, false);   // SMPL: P9..P16
+    for (int i = 0; i < 3; ++i) remote_tick((uint32_t)(9800 + 30 * i)), advance_ms(30);
+    int shownMd = 0, unusedMd = 0;
+    for (int e = 0; e < 8; ++e) {
+      const char* l = md::label(0, 8 + e);
+      if (l && l[0]) {
+        ++shownMd;
+        CHECK(shown(l));
+      } else {
+        ++unusedMd;
+      }
+    }
+    CHECK(seq::view().lock_page == seq::kLpSmpl && shownMd > 0);
+    {   // "-" only for the P9..P16 MD leaves unused
+      uint8_t t[36 * kTextSlots];
+      int n = sent_texts(t, kTextSlots), dash = 0;
+      for (int i = 0; i < n; ++i) dash += !strcmp((const char*)t + 36 * i + 4, "-");
+      CHECK(dash == unusedMd);
+    }
+    key(2, false);
+    advance_ms(100);
+    {   // a user machine (U1, vb 0x50): the manifest's label on P10 shown, P9 (no label) "-"
+      static bool (*saved)(int, int, char*, int);
+      saved = hooks.user_label;
+      hooks.user_label = [](int, int k, char* b, int cap) { return k == 9 ? (snprintf(b, (size_t)cap, "WARP"), true) : false; };
+      const uint8_t toU[] = {0xF0, 0x7D, 0x52, 0x54, 0x33, 1, 0, 1, 5, 0x50, 0xF7};
+      engine_sysex(toU, sizeof toU);
+      key(2, true);
+      key(0x32, true), key(0x32, false);
+      for (int i = 0; i < 3; ++i) remote_tick((uint32_t)(9900 + 30 * i)), advance_ms(30);
+      CHECK(shown("LOCK SMPL") && shown("WARP"));
+      key(2, false);
+      advance_ms(100);
+      hooks.user_label = saved;
+    }
+    const uint8_t toFm[] = {0xF0, 0x7D, 0x52, 0x54, 0x33, 1, 0, 1, 40, (uint8_t)(kFm | 0), 0xF7};   // and back to 6-OP FM
+    engine_sysex(toFm, sizeof toFm);
+    report(kFm | 0, {0, 64, 64, 127, 64, 64, 100, 127});
+  }
   // ---- the lock pages: BD's SEQ page; T3 held + SRC: A..H lock P1..P8 of step 3; SMPL P9..P16, FX FX1 / FX2 P2..P5;
   // a push clears one, NO every lock of the held steps; the LEDs magenta; T3 let go: no toggle, the lock page ends
   {
@@ -2965,8 +3021,8 @@ int main() {
   }
   // ---- a selection on an open page (0.5.0): rc5b's 49 02 on every selection change, a plain pad press's too (49 1 2 on
   // the emulator). Owner: "Follow, never close": SEQ, INSERT's track view, ARP and POLY follow the selection, on a track
-  // of the Rytm's own synth too, where each says so (SEQ its explain prompt, INSERT its footer, ARP and POLY their analog
-  // screens); SEQ on a Sidecar track that is no seq track shows its make prompt. LFO, INSERT's BUS view and the global
+  // of the Rytm's own synth too, where each says so (SEQ its footer, INSERT its footer, ARP and POLY their analog
+  // screens); SEQ on a Sidecar track that is no seq track shows its plain page (2026-11-15: never a make prompt). LFO, INSERT's BUS view and the global
   // pages stay as they are. No selection closes a page (no 3A 0)
   {
     report(kFm | 7, {0, 64, 64, 127, 64, 64, 100, 127});   // RS's voice (7)
@@ -3020,25 +3076,53 @@ int main() {
       return false;
     };
     auto still = [](const char* title) { return remote_page_title() && !strcmp(remote_page_title(), title); };
-    for (const char* p : {"INSERT", "SEQ", "ARP", "POLY"}) {
+    // owner 2026-11-15 (hardware, final): with SEQ open on a poly track, a selection of a track that is no poly track (TRK +
+    // pad, a plain pad press; 49 1 2) CLOSES SEQ back to the Rytm: "they just want to edit that tracks trigs, seq or not".
+    // Every non-poly track: a Sidecar track with no poly track (BT) and a track of the Rytm's own synth (SD). A poly track
+    // (RS) still follows. INSERT, ARP and POLY follow, never close. (TEXT-FIT checks the screens at exit.)
+    CHECK(run("SEQ", 2, 4));   // RS (a poly track) -> BT (a Sidecar machine, no poly track): the host sends the 3A 0 0 close
+    CHECK(run("SEQ", 2, 1));   // -> SD (the Rytm's own synth): the same
+    CHECK(run("SEQ", 0, 4) && run("SEQ", 0, 1));
+    CHECK(!run("SEQ", 0, 2) && still("SEQ") && seq::view().track == 2 && !seq::view().prompt);   // another poly track: follows
+    CHECK(!run("SEQ", 2, 0) && still("SEQ") && seq::view().track == 0 && !seq::view().prompt);
+    for (const char* p : {"INSERT", "ARP", "POLY"}) {
       CHECK(!run(p, 0, 1) && still(p));   // a pad of SD (the Rytm's synth): stays, on SD
       CHECK(!run(p, 0, 2) && still(p));   // a pad of RS (a Sidecar seq track): stays, on RS
+      CHECK(!run(p, 0, 4) && still(p));   // a pad of BT: stays
     }
-    fprintf(stderr, "  trk-sel: SEQ / INSERT / ARP / POLY follow to SD (the Rytm's synth) and to RS, never close\n");
+    fprintf(stderr, "  trk-sel: SEQ closes on a non-poly track (BT, SD), follows a poly track; INSERT / ARP / POLY never close\n");
+    // the close is the page's: 30 0 0 comes back, SEQ's state is gone, and a TRK held over it books its release (no stuck
+    // TRK: a CHRO pad is a note again, no selection)
+    {
+      engine_sysex(closed, sizeof closed);
+      sel(2);
+      auto oo = msg(0x30, {2, 1, 0});
+      engine_sysex(oo.data(), (int)oo.size());
+      remote_show_page("SEQ");
+      remote_tick(tk += 50);
+      CHECK(still("SEQ"));
+      uint32_t pads0 = poly::stats().trk_pads;
+      key(0x86, true);
+      g_out.clear();
+      sel(4), remote_tick(tk += 50);
+      CHECK(closes());
+      auto cl = msg(0x30, {0, 0, 3});   // the Rytm's answer: the page is closed (and sends no TRK release)
+      engine_sysex(cl.data(), (int)cl.size());
+      CHECK(!remote_page_title() && !seq::view().prompt);
+      poly::midi(0x9D, 45, 100), poly::midi(0x8D, 45, 0);
+      CHECK(poly::stats().trk_pads == pads0);   // TRK is not held any more: the pad is no selection
+      engine_sysex(closed, sizeof closed);
+    }
     // each page says the track is the Rytm's own synth in its own way
     CHECK(!run("INSERT", 0, 1) && shows("NO SIDECAR VOICE ON TRACK"));
     CHECK(!run("ARP", 0, 1) && shows("ANALOG TRACK: NO ARP"));
     CHECK(!run("POLY", 0, 1) && poly_page_track() == 1 && shows("SD PLAYS ANALOG:"));
-    CHECK(!run("SEQ", 0, 1) && seq::view().track == 1 && seq::view().prompt == seq::kPromptExplain &&
-          seq::view().prompt_track == 1);
     // ... and back on a Sidecar track: INSERT's slots, ARP's knobs, POLY's config again
     CHECK(!run("INSERT", 1, 2) && !shows("NO SIDECAR VOICE ON TRACK"));
     CHECK(!run("ARP", 1, 2) && !shows("ANALOG TRACK: NO ARP"));
     CHECK(!run("POLY", 1, 2) && poly_page_track() == 2 && !shows("PLAYS ANALOG"));
-    CHECK(!run("SEQ", 0, 2) && seq::view().track == 2 && !seq::view().prompt);   // SEQ from the ring follows
-    CHECK(!run("SEQ", 0, 4) && seq::view().track == 4 && seq::view().prompt == seq::kPromptMake &&
-          seq::view().prompt_track == 4);   // a Sidecar track, no seq track: its make prompt
-    // SEQ's prompts follow too: explain (SD) -> make (BT) -> a seq track (RS: no prompt) -> explain (SD)
+    // an explicit open (TRK + TRIG on SD, UP + T2) still explains; a selection to a poly track drops the prompt and shows
+    // it, and to a track that is no poly track closes: SD (explain prompt) -> RS (a seq track) -> SD (closes)
     {
       engine_sysex(closed, sizeof closed);
       sel(1);
@@ -3049,16 +3133,22 @@ int main() {
       remote_tick(tk += 50);
       CHECK(seq::view().prompt == seq::kPromptExplain && seq::view().prompt_track == 1);
       g_out.clear();
-      sel(4), remote_tick(tk += 50);
-      CHECK(seq::view().track == 4 && seq::view().prompt == seq::kPromptMake && seq::view().prompt_track == 4);
       sel(2), remote_tick(tk += 50);
-      CHECK(seq::view().track == 2 && !seq::view().prompt);
+      CHECK(seq::view().track == 2 && !seq::view().prompt && !closes() && still("SEQ"));
       sel(1), remote_tick(tk += 50);
-      CHECK(seq::view().track == 1 && seq::view().prompt == seq::kPromptExplain && !closes() && still("SEQ"));
+      CHECK(closes());
+      // the same on a Sidecar track that is no poly track (BT): the make prompt, then a selection of RS follows
+      engine_sysex(closed, sizeof closed);
+      sel(4);
+      engine_sysex(oo.data(), (int)oo.size());
+      seq::view_request(4);
+      remote_show_page("SEQ");
+      remote_tick(tk += 50);
+      CHECK(seq::view().prompt == seq::kPromptMake && seq::view().prompt_track == 4 && shows("MAKE BT A POLY TRACK?"));
     }
     engine_sysex(closed, sizeof closed);
-    // SEQ opened by TRK + TRIG (view_request) or by seq mode (REC on a seq track) follows the same way (owner, 0.5.0):
-    // a Sidecar track that is no seq track: its make prompt; a track of the Rytm's own synth: its explain prompt
+    // SEQ opened by TRK + TRIG (view_request) or by seq mode (REC on a seq track): a selection of a track that is no poly
+    // track closes it the same way (owner, 2026-11-15)
     for (int opener = 0; opener < 2; ++opener)
       for (int to : {4, 1}) {
         engine_sysex(closed, sizeof closed);
@@ -3073,12 +3163,10 @@ int main() {
         g_out.clear();
         sel(to);
         remote_tick(tk += 50);
-        const int want = to == 4 ? seq::kPromptMake : seq::kPromptExplain;
-        CHECK(!closes() && still("SEQ") && seq::view().track == to && seq::view().prompt == want);
-        if (opener == 1) {   // the Rytm's 08 0 (REC now on a track that is no seq track): the prompt stays
-          direct_state({8, 0, 0x7F}), seq::tick(now_ms() + 160);
-          CHECK(!closes() && !seq::view().seqmode && seq::view().prompt == want);
-        }
+        CHECK(closes());
+        auto cl = msg(0x30, {0, 0, 3});
+        engine_sysex(cl.data(), (int)cl.size());
+        CHECK(!remote_page_title() && !seq::view().seqmode && !seq::view().prompt);
       }
     engine_sysex(closed, sizeof closed);
     CHECK(!run("LFO", 0, 1));                 // LFO stays (the Rytm tracks' own modulation too)

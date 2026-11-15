@@ -14,6 +14,7 @@
 #include <sys/stat.h>   // chmod
 
 #include "check.h"
+#include "ui/remote.h"
 #include "poly.h"
 #include "voices.h"
 #include "wavetable/tables.h"
@@ -200,6 +201,32 @@ static void test_list_and_load() {
   char o[400];
   CHECK(wt::command("wt", o, sizeof o) && strstr(o, "3/4 card tables resident"));
   wt::reset();
+}
+
+// owner 2026-11-15 (hardware): WAVETABLE knew its table only once a note had played with it. The voice is idle: its first
+// report (the machine chosen, TBL OFF), then the pick in the Rytm's list reaches the host as the SRC view's 2A (P1) only.
+// The table loads and the voice shows it (the SRC view draws voice_entry / viz_frame) with no note.
+static void test_idle_pick() {
+  const int t = 0, vi = ui::remote_track_voice(t);   // BD: voice 0
+  CHECK(vi == 0);
+  wg::send({0xF0, 0x7D, 0x52, 0x54, 0x33, 1, (uint8_t)t, 1, 46, (uint8_t)(kW | vi), 0xF7});   // the machine chosen
+  wg::params(kW, vi, P(0, 0));   // its first report: TBL OFF
+  idle();
+  CHECK(wt::voice_entry(vi) != entry("clm256"));
+  uint32_t trigs = wt::stats().trigs;
+  int e = entry("clm256");
+  wg::send({0xF0, 0x7D, 0x52, 0x54, 0x29, 1, (uint8_t)t, 1, 0xF7});   // its SRC view
+  wg::send({0xF0, 0x7D, 0x52, 0x54, 0x2A, 1, (uint8_t)t, 0, 1, (uint8_t)(e & 127), (uint8_t)srclib::lo_of(e), 0xF7});   // the pick
+  idle();
+  CHECK(wt::voice_entry(vi) == e && wt::table_frames(e) == 4);
+  int nf = 0;
+  float y[64];
+  wt::viz_pos(vi, &nf);
+  CHECK(nf == 4 && wt::viz_frame(vi, 0, 64, y) == 64);
+  CHECK(wt::stats().trigs == trigs);   // (no note played)
+  wg::send({0xF0, 0x7D, 0x52, 0x54, 0x33, 1, (uint8_t)t, 1, 0, 0x7F, 0xF7});   // not ours again
+  wt::reset();
+  printf("test_wavetable: a table picked on an idle voice (2A) loads and shows with no note\n");
 }
 
 // frames morph smoothly: a POS sweep over the harmonic table, no step beyond what the waves themselves have
@@ -486,6 +513,7 @@ int main() {
   CHECK(pu::put(pools::kTables, "A010", "/WAVETABLES/sub/clm256.wav") == pools::kOk);
   idle();
   test_list_and_load();
+  test_idle_pick();
   test_morph();
   test_alias();
   test_unison();

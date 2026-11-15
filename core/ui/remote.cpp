@@ -36,6 +36,7 @@
 #include "granular/granular.h"
 #include "msamp/msamp.h"
 #include "msamp/sdtest.h"
+#include "wavetable/wavetable.h"
 #include "bundle/prjslot.h"
 #include "bundle/rename.h"
 #include "nmach.h"
@@ -196,6 +197,28 @@ CORE_COLD bool juno_partner(int t) {
   for (int u = 0; u < 12; ++u)
     if (u != t && kTrackVoice[u] == kTrackVoice[t] && track_vb[u] != kNotOurs && machine_of(track_vb[u]) == kJuno) return true;
   return false;
+}
+// 0.5.0 (owner 2026-11-15, hardware: a new SAMPLER, a sample picked in the pool list: SAMPLE EDIT said NO SAMPLE until it
+// had played; WAVETABLE knew its table only after a note): the voice's own state comes from the Rytm's 0x03 / 0x04
+// reports, which come only while it plays, so a pick or a turn on an idle voice reached the host as the SRC view's 2A
+// alone (src14) and stayed there. A new src14 of track t selects that entry on its voice as the next report would:
+// WAVETABLE's TBL, GRANULAR's SRC, MULTISAMPLE's INST (P1: their tables, samples and instruments load, their views show
+// them). CHOP takes src14 itself (chop.cpp preload_step); DSP SAMPLE / SAMPLER's SMP is read from src14 where it is
+// used (SAMPLE EDIT: sedit::open_track; the SRC view draws the 2A's), the voice's state left as its reports set it.
+// Only on a voice whose last report was that machine (its flags) and no other track of ours on the voice with the same
+// machine (whose sound the voice plays is the one that trigged last: unknown here).
+CORE_COLD void src_to_voice(int t, int c14) {
+  if (!have_tracks || t < 0 || t >= 12 || track_vb[t] == kNotOurs || c14 < 0) return;
+#if CORE_MSAMP
+  const int m = machine_of(track_vb[t]), vi = kTrackVoice[t];
+  for (int u = 0; u < 12; ++u)
+    if (u != t && kTrackVoice[u] == vi && track_vb[u] != kNotOurs && machine_of(track_vb[u]) == m) return;
+  const V& x = v[vi];
+  const int e = srclib::code_of14(c14);
+  if (m == kWaveMachine && x.wt) wt::kit_src(vi, e);
+  else if (m == kGranMachine && x.gr) gr::kit_src(vi, e);
+  else if (m == kMultiMachine && x.ms) msamp::kit_src(vi, e);
+#endif
 }
 CORE_COLD int machine_of_voice(int vi) {
   vi &= 7;
@@ -375,6 +398,7 @@ struct State {
   bool clock_set = false;
   bool map_over = false;     // rui1050: UP's map shown over the open page (49 1 5 1), map_back the page under it
   int map_back = -1;
+  bool up_down = false;      // 0.5.0 FILL: UP held on the open page (its 31s, whichever page takes them): up_right_fill
   // 0.5.0 (spec-050 2.6): the keys an engine page with key_up took at their press (bit c: code c), and that page
   uint32_t held_keys[8] = {};
   const ExtraPage* held_page = nullptr;
@@ -452,6 +476,9 @@ struct State {
   uint16_t keep_known[12] = {}, keep_mask = 0;
   uint8_t srcl[12][16] = {};      // rui1038: the 2A's fraction bytes (P1 of GRANULAR / WAVETABLE / MULTISAMPLE: bank << 4)
   int16_t src14[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // P1's last 14 bits by 2A or our 48 (song)
+  // 0.5.0: which is newer, the Rytm's own word on a track's src14 (its 2A; our 48s are only asked) or its voice's last
+  // report (remote_track_src14_fresh): one count of both
+  uint32_t src14_at[12] = {}, rep_at[8] = {}, at_n = 0;
   int16_t wr_pat[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // P1 our 48 wrote, its answer owed (presetpick)
   uint8_t wr_ans[12][16] = {};   // remote_track_write's answers: 0 none, 1 owed, 2 + the Rytm's status
   uint16_t src_known[12] = {};
@@ -756,6 +783,27 @@ CORE_COLD void release_held() {
 }
 
 CORE_COLD bool key_held(int code) { return code >= 0 && code < 256 && (s.held_keys[code >> 5] >> (code & 31) & 1); }
+
+// 0.5.0 FILL (owner, 2026-11-15 on hardware: "UP + RIGHT (FILL mode) doesn't do anything"): rytm-mods 0026 sends UP +
+// RIGHT as 49 1 1 16 only while its page is closed. A hand holds UP a moment before the arrow: after 0.4 s the Rytm asks
+// for the combo map (49 1 4 1), the host opens the page on KEYS, and RIGHT then reaches that open page as a 31, where it
+// did nothing, and UP's release closed the map: nothing at all. With a page open UP and RIGHT are always its 31s. So
+// RIGHT with UP held is FILL here too: UP held on the open page (its 31), or UP's map up (from the stock screen, 49 1 4;
+// over a page, 49 1 5). FILL itself keeps its own UP + RIGHT (it closes: the combo toggles).
+CORE_COLD bool up_right_fill() {
+#if CORE_POLY
+  if (!s.up_down && !keys_map_on() && !s.map_over) return false;
+  const ExtraPage* x = extra_of(s.voice);
+  if (x && !strcmp(x->title, "FILL")) {   // FILL's own UP + RIGHT (it closes), also when UP went down before FILL opened
+    if (x->key) x->key(kKeyUp);           // (its press never reached FILL: the map's, or held over the open)
+    return false;
+  }
+  fill_page_open(-1);   // (UP's release then leaves FILL up: the map's end closes or restores only KEYS)
+  return true;
+#else
+  return false;
+#endif
+}
 
 
 CORE_COLD void on_key(int code, bool down) {
@@ -1657,6 +1705,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         s.shortcut = false, s.via = -1, s.sedit_back = kNoPage;
         keys_map_drop(), s.map_over = false;   // (UP's map goes with the page)
         release_held();                        // 0.5.0: and every key a page holds
+        s.up_down = false;
 #if CORE_POLY
         seq::page_closed();   // seq-ux: a prompt, TRK + TRIG's view end with the page
         poly_page_closed();   // rui1048
@@ -1689,6 +1738,11 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 #if CORE_POLY
       if ((b[0] << 7 | b[1]) == 0x86) core::poly::rytm_trk(b[2] != 0);   // 1042: TRK + pad is a selection (core/poly.h)
 #endif
+      if (s.open && (b[0] << 7 | b[1]) == kKeyUp) s.up_down = b[2] != 0;
+      if (s.open && b[2] && (b[0] << 7 | b[1]) == kKeyRight && up_right_fill()) {   // 0.5.0: UP + RIGHT, the page open
+        s.input = true;
+        return;
+      }
       if (!s.open && src_bank_key(b[0] << 7 | b[1], b[2])) {   // rui1038: the bank list's LEFT RIGHT UP DOWN (0.5.0: 2 = with FUNC)
         s.input = true;
         return;
@@ -1761,9 +1815,12 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       }
       if (b[1] != 1) page_two_cancel();                          // rc5: a snapshot (a load) is no list choice
       else if (s.mlist) s.mlist_moved |= (uint16_t)(1u << b[0]);
-      for (int i = 0; i < b[1]; ++i)
-        track_vb[b[0] + i] = track_vb_of(b[0] + i, b[3 + 2 * i], b[2 + 2 * i]), tracks_known |= (uint16_t)(1u << (b[0] + i)),
-        track_smpl[b[0] + i] = b[2 + 2 * i] == kRytmSampler, track_rm[b[0] + i] = b[2 + 2 * i];
+      for (int i = 0; i < b[1]; ++i) {
+        const int t = b[0] + i;
+        const uint8_t vb = track_vb_of(t, b[3 + 2 * i], b[2 + 2 * i]);
+        if (vb != track_vb[t] || b[2 + 2 * i] != track_rm[t]) s.src14[t] = -1;   // 0.5.0: another machine's knob is no SMP / TBL
+        track_vb[t] = vb, tracks_known |= (uint16_t)(1u << t), track_smpl[t] = b[2 + 2 * i] == kRytmSampler, track_rm[t] = b[2 + 2 * i];
+      }
       have_tracks = true;
       for (int vi = 0; vi < kVoices; ++vi) {   // polyuser-4 F-b1: a voice with no report yet takes its tracks' machine
         int m = -1;
@@ -1846,7 +1903,11 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       }
       if (!held) {   // rui1038: the banked knob's 14 bits (song): P1, or DSP SAMPLE's SMP P11 (rui1045)
         int kb = remote_track_src_param(t);
-        if (b[1] <= kb && kb < b[1] + b[2]) s.src14[t] = (int16_t)((b[3 + 2 * (kb - b[1])] & 0x7F) << 7 | (b[4 + 2 * (kb - b[1])] & 0x7F));
+        if (b[1] <= kb && kb < b[1] + b[2]) {
+          const int16_t c14 = (int16_t)((b[3 + 2 * (kb - b[1])] & 0x7F) << 7 | (b[4 + 2 * (kb - b[1])] & 0x7F));
+          if (c14 != s.src14[t]) src_to_voice(t, c14);   // 0.5.0: an idle voice's pick (src_to_voice)
+          s.src14[t] = c14, s.src14_at[t] = ++s.at_n;
+        }
       }
 #if CORE_MSAMP
       if (!held && have_tracks && track_vb[t] != kNotOurs && (track_vb[t] & kMidiMachine) && s.src_known[t] == 0xFFFF) {
@@ -1925,10 +1986,12 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 #if CORE_POLY
         if (moved) seq::selected_track(b[1]), core::poly::selected_voice(remote_track_voice(b[1]));   // rui1040: the SEQ page
                                                   // follows the selection; the pads' binding too
-        // 0.5.0 (owner: "Follow, never close"; a plain pad press selects its track too, 49 1 2): the track pages (SEQ,
-        // INSERT's track view, ARP, POLY) follow the selection, also to a track of the Rytm's own synth, which each
-        // page shows in its own way (SEQ its explain prompt, INSERT its footer, ARP and POLY their analog screens).
-        // No selection closes a page. (A pattern or kit load that moves the selection does the same.)
+        // 0.5.0: the track pages INSERT's track view, ARP and POLY follow the selection (a plain pad press selects its
+        // track too, 49 1 2), also to a track of the Rytm's own synth, which each shows in its own way (INSERT its footer,
+        // ARP and POLY their analog screens): "follow, never close". SEQ is the one that closes (owner 2026-11-15): on a
+        // selection of a track that is no poly track seq::selected_track asks the Rytm to close it (3A 0 0), so the user
+        // edits that track's own trigs; a poly track still follows. (A pattern or kit load that moves the selection does
+        // the same.)
 #endif
         disp.info_gen = disp.info_gen + 1;
         return;
@@ -1967,6 +2030,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       lfo::kit_changed(b[0]);
       if (b[0] != kit_said) {  // (a 3B also comes with every page open and hello: the same kit is no change)
         kit_said = b[0];
+        for (int t = 0; t < 12; ++t) s.src14[t] = -1;   // 0.5.0: the old kit's SMP / TBL / SRC / INST (its 2As come again)
         page_two_cancel();     // rc5: a kit loaded around a list choice: its machines and words are the kit's
 #if CORE_MSAMP
         midim::kit_switched(); // MIDI: its held notes off; the new kit's PRG and the rest go out at its reports
@@ -2001,6 +2065,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         // What the hello invalidates on the Rytm's side is sent again, as after an open.
         s.sent_valid = false, s.mask_valid = false, s.echo_valid = false, s.leds_on = false, s.clock_set = false;
         release_held();   // 0.5.0: a key held across the new link sends no release
+        s.up_down = false;
         s.caps36 = (b[2] & 1) != 0, s.caps = b[2], s.caps2 = n >= 4 ? b[3] : 0;
         mod::rytm_host_cmd((b[2] & mod::kCapsHostCmd) != 0);   // 0.5.0: the mod command (core/mod/rytm_out.h)
         fill_claim();
@@ -2024,6 +2089,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 #endif
       keys_map_drop(), s.map_over = false;   // (a release lost with the link: no map left up)
       release_held();                        // 0.5.0: and every key a page holds
+      s.up_down = false;
       // A status popup goes with the old link. The pairing code's modal does not: it is owed until it has been on
       // this Rytm's screen, and a hello arriving while it was owed or up (the Rytm restarting, or saying hello again
       // after a silence) dropped it, so the code was never seen (audit 2026-10-26). It starts again, on this link.
@@ -2234,6 +2300,7 @@ CORE_COLD void remote_src_log(bool on) { src_log = on; }
 CORE_COLD void remote_params(int vi, int m, float* p, int np) {
   vi &= 7;
   reported[vi] = true;
+  s.rep_at[vi] = ++s.at_n;
   if (s.self) return;
   if (s.held_m[vi] != m) s.held[vi] = 0, s.held_m[vi] = (uint8_t)m;   // another machine: its edits go
   for (int k = 0; k < np && k < 16; ++k) {
@@ -2438,6 +2505,15 @@ CORE_COLD int remote_track_write_answer(int t, int k) {
   return a == 0 ? -2 : a == 1 ? -1 : a - 2;
 }
 CORE_COLD int remote_track_src14(int t) { return t >= 0 && t < 12 ? s.src14[t] : -1; }
+CORE_COLD int remote_track_src14_fresh(int t) {
+  if (t < 0 || t >= 12 || s.src14[t] < 0) return -1;
+  // a voice shared with another track of ours on the same machine: its report may be that track's, src14 is this one's
+  for (int u = 0; u < 12; ++u)
+    if (u != t && have_tracks && kTrackVoice[u] == kTrackVoice[t] && track_vb[u] != kNotOurs && track_vb[t] != kNotOurs &&
+        machine_of(track_vb[u]) == machine_of(track_vb[t]))
+      return s.src14[t];
+  return s.src14_at[t] > s.rep_at[kTrackVoice[t]] ? s.src14[t] : -1;
+}
 CORE_COLD int remote_track_src_value(int t, int k) {
   return t >= 0 && t < 12 && k >= 0 && k < 16 && (s.src_known[t] >> k & 1) ? s.srcv[t][k] : -1;
 }

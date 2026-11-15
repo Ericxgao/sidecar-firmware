@@ -1140,6 +1140,125 @@ int main() {
     send(msg(0x31, {0, 0x41, 0}));
     send(msg(0x31, {0, 0x42, 0}));
     CHECK(!ui::fill_page_view().on);
+    // owner 2026-11-15 (hardware, t050-f + rc5b: "UP + RIGHT (FILL mode) doesn't do anything"): the whole path with the
+    // bytes rc5b's 0026 sends, on a Sidecar track (BD) and on a track of the Rytm's own synth (SD).
+    // - The page closed, UP + RIGHT at once: 49 1 1 16, the host asks the page open (3A 0 1), the Rytm opens it for the
+    //   host (30 0 1 1, R_HOST): FILL on the selected track.
+    // - The page closed, UP held 0.4 s first (as a hand does): the Rytm asks the combo map (49 1 4 1), the host opens the
+    //   page on KEYS, and RIGHT then is the open page's (31 41: rc5b forwards UP + RIGHT only with the page closed). It
+    //   did nothing there and UP's release (49 1 4 0) closed the map: nothing at all. Now FILL, and it stays at the release.
+    // - The page open (SIDECAR, a ring page; UP and RIGHT are its 31s): UP held + RIGHT opens FILL, with or without UP's
+    //   map over the page (49 1 5 1 after 0.4 s).
+    {
+      auto sel = [](int t) {
+        std::vector<uint8_t> b = {2, (uint8_t)t, 46};
+        for (int i = 0; i < 12; ++i) b.push_back('A');
+        send(msg(0x49, b));
+      };
+      auto asked = [](int on) {
+        for (auto& o : g_out)
+          if (o.size() == 9 && o[4] == 0x3A && o[7] == on) return true;
+        return false;
+      };
+      auto title_is = [](const char* t) { return ui::remote_open() && ui::remote_page_title() && !strcmp(ui::remote_page_title(), t); };
+      auto fill_shown = [&](int t) { return title_is("FILL") && ui::fill_page_view().on && ui::fill_page_view().track == t; };
+      uint32_t tk = now_ms();
+      auto ticks = [&](int n) { for (int i = 0; i < n; ++i) ui::remote_tick(tk += 50); };
+      auto up_right = [&](bool map) {   // with the page open: UP down, (UP's map over the page), RIGHT down / up, UP up
+        send(msg(0x31, {0, 0x42, 1}));
+        ticks(8);
+        if (map) send(msg(0x49, {5, 1}));
+        ticks(1);
+        send(msg(0x31, {0, 0x41, 1}));
+        send(msg(0x31, {0, 0x41, 0}));
+        ticks(1);
+        if (map) send(msg(0x49, {5, 0}));
+        send(msg(0x31, {0, 0x42, 0}));
+        ticks(4);
+      };
+      for (int t : {0, 1}) {
+        // the page closed, UP + RIGHT at once
+        send(msg(0x30, {0, 0, 0}));
+        ui::fill_page_reset();
+        sel(t);
+        ticks(1);
+        g_out.clear();
+        send(msg(0x49, {1, ui::kPageFill}));
+        ticks(1);
+        CHECK(asked(1));
+        send(msg(0x30, {0, 1, 1}));   // the Rytm opens the page for the host (enter R_HOST)
+        ticks(4);
+        CHECK(fill_shown(t));
+        // the page closed, UP held first: the map, then RIGHT on the open page, then UP let go
+        send(msg(0x30, {0, 0, 0}));
+        ui::fill_page_reset();
+        ticks(1);
+        g_out.clear();
+        send(msg(0x49, {4, 1}));
+        ticks(1);
+        CHECK(asked(1));
+        send(msg(0x30, {0, 1, 1}));
+        ticks(1);
+        CHECK(title_is("KEYS"));
+        send(msg(0x31, {0, 0x41, 1}));
+        send(msg(0x31, {0, 0x41, 0}));
+        ticks(1);
+        g_out.clear();
+        send(msg(0x49, {4, 0}));
+        ticks(4);
+        CHECK(fill_shown(t) && !asked(0));
+        // review: FILL opened with UP still held (the map's), a second RIGHT with UP still held closes it (the combo toggles)
+        send(msg(0x30, {0, 0, 0}));
+        ui::fill_page_reset();
+        ticks(1);
+        send(msg(0x49, {4, 1}));
+        send(msg(0x30, {0, 1, 1}));
+        ticks(1);
+        send(msg(0x31, {0, 0x41, 1}));
+        send(msg(0x31, {0, 0x41, 0}));
+        ticks(1);
+        CHECK(fill_shown(t));
+        send(msg(0x31, {0, 0x41, 1}));
+        send(msg(0x31, {0, 0x41, 0}));
+        ticks(1);
+        CHECK(!ui::fill_page_view().on);
+        send(msg(0x49, {4, 0}));
+        ticks(2);
+        // the page open: SIDECAR, then a ring page (LFO); without and with UP's map over it
+        for (int via : {0, 1})
+          for (bool map : {false, true}) {
+            send(msg(0x30, {0, 0, 0}));
+            ui::fill_page_reset();
+            send(msg(0x30, {0, 1, 0}));   // a user open (SIDECAR)
+            ticks(1);
+            if (via) ui::remote_show_page("LFO");
+            ticks(1);
+            CHECK(ui::remote_open() && (via ? title_is("LFO") : !ui::remote_page_title()));   // (SIDECAR: no extra page)
+            up_right(map);
+            CHECK(fill_shown(t));
+          }
+        // UP tapped, then RIGHT alone: the page's own RIGHT (no FILL)
+        send(msg(0x30, {0, 0, 0}));
+        ui::fill_page_reset();
+        send(msg(0x30, {0, 1, 0}));
+        ticks(1);
+        ui::remote_show_page("LFO");
+        ticks(1);
+        send(msg(0x31, {0, 0x42, 1}));
+        send(msg(0x31, {0, 0x42, 0}));
+        send(msg(0x31, {0, 0x41, 1}));
+        send(msg(0x31, {0, 0x41, 0}));
+        ticks(2);
+        CHECK(!ui::fill_page_view().on && !title_is("FILL"));
+        // on FILL itself UP + RIGHT still closes it (the combo toggles)
+        cmd(t ? "fill=open:1" : "fill=open:0");
+        ticks(1);
+        CHECK(fill_shown(t));
+        up_right(false);
+        CHECK(!ui::fill_page_view().on);
+      }
+      send(msg(0x30, {0, 0, 0}));
+    }
     // fix/fill-persist: no 2D 02 seen yet: the page says why nothing is written
     writer_reset(r, -1);
     cmd("fill=open:0");

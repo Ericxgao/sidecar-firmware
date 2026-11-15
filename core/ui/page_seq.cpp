@@ -394,7 +394,12 @@ CORE_COLD void lock_label(int pg, int t, int e, char* b, int cap) {
     if (p && p->label[e][0]) sniprintf(b, cap, "%.4s", p->label[e]);
     else if (remote_track_voice(t) < 0 || !voice_label(remote_track_voice(t), e, b, cap)[0]) sniprintf(b, cap, "-");   // (unused)
   } else if (pg == seq::kLpSmpl) {
-    sniprintf(b, cap, "%s", p2_label(remote_track_machine(t), e));
+    // voice_label first (MD's labels, user machines' manifests, code pages, machine_label), but 6-OP FM's P9..P12 are the
+    // Rytm's stock sample knobs (p2_label), which voice_label does not give; p2_label else, "-" when both have none
+    const int vi = remote_track_voice(t);
+    const int vb = remote_track_machine(t);
+    const bool fm = vb >= 0 && vb != 0x7F && machine_of((uint8_t)vb) == kFm;
+    if (fm || vi < 0 || !voice_label(vi, 8 + (e & 7), b, cap)[0]) sniprintf(b, cap, "%s", p2_label(vb, e));
   } else if (pg == seq::kLpFx && e / 4 < fx::kSlots) {
     const fx::KnobLabels* l = fx::labels(fx::control.knob[e / 4][0]);
     if (l && l->label[e % 4] && l->label[e % 4][0]) sniprintf(b, cap, "%.4s", l->label[e % 4]);
@@ -818,8 +823,8 @@ CORE_COLD void seq_draw(Canvas& c, int page, int npages, uint32_t ms) {
     sniprintf(b, sizeof b, CORE_STR("%c%02d %s: LOCKED"), 'A' + pat / 16 % 8, pat % 16 + 1,
               w.locked == 1 ? "FROM NEWER SIDECAR" : "FILE DAMAGED");
     footer(c, b);
-  } else if (!w.seq) {
-    footer(c, "B UP: MAKE A POLY TRACK");
+  } else if (!w.seq) {   // (a selection lands here too, never on a prompt: 0.5.0, owner)
+    footer(c, w.can_make ? "B UP: MAKE A POLY TRACK" : "ANALOG: NO POLY TRACK");
   } else if (w.seqmode) {
     footer(c, "TAP:STEP HOLD+PADS:NOTES");
   } else {

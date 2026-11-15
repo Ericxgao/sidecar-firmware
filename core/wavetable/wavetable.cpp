@@ -651,6 +651,13 @@ CORE_COLD bool pick(int vi, int e) {   // the touchscreen's choice: TBL written 
   log(CORE_STR("wt: voice %d: TBL %c%03d %s"), vi, 'A' + srclib::bank_of(e), e & 127, entry_name(e));
   return true;
 }
+CORE_COLD void kit_src(int vi, int e) {
+  vi &= 7;
+  if (!job || !list || e < 0 || e >= nlist) return;
+  vp[vi][0] = (float)(e & 127) + (float)srclib::lo_of(e) / 128.0f;
+  select(vi);
+  pools::seen(pools::kTables, e);   // (the used set, as a report)
+}
 CORE_COLD void preview(int vi, int e) {
   vi &= 7;
   if (!job || !list || !(v[vi].wt || force[vi])) return;
