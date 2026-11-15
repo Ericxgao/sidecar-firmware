@@ -240,6 +240,7 @@ void sedit_page_reset();   // tests
 #endif
 void poly_page_closed();
 int poly_page_track();   // the track it shows (tests)
+bool ins_page_bus();     // INSERT shows the BUS view (not a track's): a selection does not move it
 #if CORE_UI_TOOLS
 // tests and the renderer: the view (track -1: the Rytm's; out: the OUT view; eq: ins1112's EQ view, RIGHT)
 void ins_page_set(bool bus, int slot, int busel, int track, bool out = false, bool eq = false);

@@ -182,6 +182,12 @@ CORE_COLD int detent_step(int e, const void* key, int v, int step, int neutral, 
   return nv;
 }
 
+CORE_COLD int list_size(const Page& p, int param) {
+  for (int i = 0; i < p.ncells; ++i)
+    if (p.cells[i].kind == kList && p.cells[i].in[0] == param) return list_count(p.cells[i].names);
+  return 0;
+}
+
 CORE_COLD int step_value(const Page& p, int param, int v, int delta, bool func) {
   for (int i = 0; i < p.ncells; ++i) {
     const Cell& c = p.cells[i];
@@ -219,7 +225,7 @@ bool list_paced = true;
 
 CORE_COLD void list_pacing(bool on) { list_paced = on; }
 
-CORE_COLD int list_turn(int e, int delta) {
+CORE_COLD int list_turn(int e, int delta, int n) {
   if (!delta || !list_paced) return delta;
   const int dir = delta > 0 ? 1 : -1;
   if (e < 0 || e > 8) return dir;
@@ -229,7 +235,8 @@ CORE_COLD int list_turn(int e, int delta) {
   k.turn_ms = ms;
   if (rest || (k.acc > 0) != (delta > 0)) k.acc = 0;
   k.acc += delta;
-  if (!rest && ((k.acc < 0 ? -k.acc : k.acc) < kListCounts || ms - k.step_ms < kListGapMs)) return 0;
+  const bool at_once = rest && !(n > 0 && n <= kListSmall);   // (a small list: a touch after a rest is no step)
+  if (!at_once && ((k.acc < 0 ? -k.acc : k.acc) < kListCounts || ms - k.step_ms < kListGapMs)) return 0;
   k.acc = 0, k.step_ms = ms;
   return dir;
 }
