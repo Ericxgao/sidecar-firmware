@@ -4,9 +4,12 @@
 // compiler), loaded into UFX1 / UFX2 by um and run through fx::SendFx as core 2 runs them. Checked:
 //   - both load (API 3, an effect, the delay memory in the arena) and give the Rytm their knob names;
 //   - NIMBUS: DCY sets the tail's length, TONE closes the top, the sides differ, ENS adds the pad (a held sine comes
-//     back with the ensemble chorus's 5.9 Hz sidebands, which the reverb alone does not make), the pad ends with a
-//     short decay; the loudest settings stay finite and bounded and end without denormals;
-//   - GALACTIC: REPL sets the tail's length, BRT closes the top, the sides differ; finite, bounded, no denormals;
+//     back with the ensemble chorus's 5.9 Hz sidebands, which the reverb alone does not make), the pad sounds and then
+//     ends with a short decay;
+//   - GALACTIC: REPL sets the tail's length and holds it at 0, BRT closes the top, the sides differ, BIG turned down
+//     and up in a tail keeps playing;
+//   - the loudest settings of both: the slot is not muted and the tail is alive and under the host's clamp (the host
+//     turns a NaN into silence and clamps to +-1, so "finite" alone would prove nothing here);
 //   - the cost of one send slot's call on this Mac (printed; the Pi's estimate: core/tests/bench/ufx_bench.sh).
 #include <sys/stat.h>
 #include <unistd.h>
@@ -232,15 +235,19 @@ int main() {
     x.resize(48000 * 8, 0.0f);
     Run a(0, 0, 127, 80, 64);
     a.go(x, &L, &R);
-    float end = rms(L, 48000 * 7, 48000 * 8);
-    printf("test_ufx_ambient: NIMBUS pad: %.2e 5 s after the sine ends (DCY 0)\n", end);
-    CHECK(sane(L, 2.0f) && sane(R, 2.0f) && end < 1e-6f);
+    float at = rms(L, 48000 * 2, 48000 * 2 + 9600), end = rms(L, 48000 * 7, 48000 * 8);
+    printf("test_ufx_ambient: NIMBUS pad: %.2e in the 0.2 s after the sine ends, %.2e 5 s after it (DCY 0)\n", at, end);
+    CHECK(sane(L, 2.0f) && sane(R, 2.0f) && at > 1e-3f && end < 1e-6f);
   }
   {   // the loudest settings: full-scale noise for 4 s, then 6 s of silence
     std::vector<float> x = burst(4.0f, 10.0f, 1.0f);
     Run a(0, 127, 127, 127, 127);
     a.go(x, &L, &R);
     CHECK(sane(L, 4.0f) && sane(R, 4.0f));
+    float tail = rms(L, L.size() - 48000, L.size()), pk = 0.0f;
+    for (float y : L) pk = std::fabs(y) > pk ? std::fabs(y) : pk;
+    printf("test_ufx_ambient: %s loudest: tail %.3f, peak %.3f\n", "NIMBUS", tail, pk);
+    CHECK(!um::slot_view(5).muted && tail > 1e-3f && pk < 0.99f);
   }
 
   // ---- GALACTIC
@@ -271,6 +278,37 @@ int main() {
     Run a(1, 1, 127, 127, 127);
     a.go(x, &L, &R);
     CHECK(sane(L, 4.0f) && sane(R, 4.0f));
+    float tail = rms(L, L.size() - 48000, L.size()), pk = 0.0f;
+    for (float y : L) pk = std::fabs(y) > pk ? std::fabs(y) : pk;
+    printf("test_ufx_ambient: %s loudest: tail %.3f, peak %.3f\n", "GALACTIC", tail, pk);
+    CHECK(!um::slot_view(6).muted && tail > 1e-3f && pk < 0.99f);
+  }
+  {   // REPL 0 holds what is in the tank: the level 1 s and 5 s after a burst is the same
+    std::vector<float> x = burst(1.0f, 2.0f, 0.1f);
+    Run a(1, 40, 64, 64, 127);
+    a.go(x, &L, &R);            // fill it, then freeze
+    fx::control.knob[0][2] = 0;
+    x.assign(48000 * 6, 0.0f);
+    a.go(x, &L, &R);
+    float e1 = rms(L, 48000, 48000 * 2), e5 = rms(L, 48000 * 5, 48000 * 6);
+    printf("test_ufx_ambient: GALACTIC REPL 0: %.2e 1 s into the freeze, %.2e at 5 s\n", e1, e5);
+    CHECK(e1 > 1e-3f && e5 > 0.7f * e1 && e5 < 1.3f * e1);
+  }
+  {   // BIG turned down and up again in a tail (the delays' lengths change under their counters)
+    std::vector<float> x = burst(1.0f, 2.0f, 0.1f), z(4800, 0.0f);
+    Run a(1, 20, 64, 64, 127);
+    a.go(x, &L, &R);
+    float pk = 0.0f;
+    for (int big : {90, 40, 0, 30, 127, 64, 127}) {
+      fx::control.knob[0][5] = (uint8_t)big;
+      a.go(z, &L, &R);
+      CHECK(sane(L, 2.0f) && sane(R, 2.0f));
+      for (float y : L) pk = std::fabs(y) > pk ? std::fabs(y) : pk;
+    }
+    z.assign(48000, 0.0f);
+    a.go(z, &L, &R);
+    printf("test_ufx_ambient: GALACTIC BIG moved in a tail: peak %.3f, the tail after it %.2e\n", pk, rms(L, 0, L.size()));
+    CHECK(!um::slot_view(6).muted && pk < 0.99f && rms(L, 0, L.size()) > 1e-4f);
   }
 
   // ---- the cost of one call (one send slot, 12 frames) on this Mac, busy settings

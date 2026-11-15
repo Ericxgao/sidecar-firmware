@@ -927,7 +927,8 @@ Airwindows' Galactic by Chris Johnson, ported to C: a huge, soft, drifting space
 whole signal path at its 1x rate, the delay times, the knob laws. Changed: the delay memory is 32-bit float in the
 slot arena (528 KB for each of its two states), the send's mono sum feeds both sides (the stereo comes from the
 pre-delay vibrato's two phases), always fully wet, 12 dB of gain on the output so it sits level with the other send
-FX, no dither. With Detune at 0 the port equals Airwindows' own code to -92 dB (a null test on the Mac).
+FX, no dither. With Detune at 0 the port equalled Airwindows' own code to about -136 dB (checked once on the Mac against the
+original built there; not a test in this repo).
 
 | Knob | Label | Values | What it does |
 |---|---|---|---|
@@ -947,8 +948,8 @@ first; `--p1..--p4`, `--bpm`). `core/tests/bench/ufx_bench.sh` builds each rende
 the A72 model: PHASER about 1.9 k instructions and 1.5 k model cycles a 12-frame block, BBD 3.4 k and 2.5 k (the send
 FX's budget for one call is 120 us: about 180 k cycles on a Pi 4 at 1.5 GHz).
 `core/tests/test_ufx_ambient.cpp` does the same for NIMBUS and GALACTIC (`make -C plugins/ufx_nimbus fixtures`, `make -C
-plugins/ufx_galactic fixtures`): the labels, the decay and tone knobs, the ensemble's pad, stereo, the loudest
-settings, NaN and denormals. The A72 model: NIMBUS about 52 k instructions and 41 k model cycles a block (the dearest
+plugins/ufx_galactic fixtures`): the labels, the decay and tone knobs, the ensemble's pad, stereo, GALACTIC's freeze and a size change in a
+tail, and the loudest settings (not muted, the tail alive and under the host's clamp). The A72 model: NIMBUS about 52 k instructions and 41 k model cycles a block (the dearest
 effect: about a quarter of one call's budget on a Pi 4 by the model, which is a floor), GALACTIC 12 k and 12 k.
 
 ## 13. Presets

@@ -35,7 +35,7 @@ typedef struct {
   float atk, rel;
   ring ch;
   lfo c1, c2;
-  int ctl;
+  int ctl, ens_on;
   /* the reverb */
   ring pre[2], dif[2][4], line[LINES], lap[LINES];
   lfo dl[2][4], ll[LINES];
@@ -71,6 +71,8 @@ static inline float sin_t(float x) {   /* sin(2 pi x), x in turns (4e-6) */
   float a = x * TWO_PI, a2 = a * a;
   return a * (1.0f + a2 * (-0.16666667f + a2 * (0.0083333310f + a2 * (-0.00019840874f + a2 * 2.7525562e-6f))));
 }
+/* a knob's value toward its target, and onto it when near (a one-pole alone stops just short, at a denormal) */
+static inline float glide(float x, float t) { float d = t - x; return d > -1e-6f && d < 1e-6f ? t : x + 0.02f * d; }
 static inline float cos_t(float x) { return sin_t(x + 0.25f); }
 static inline float rnd(uint32_t *s) { *s = *s * 1664525u + 1013904223u; return (float)(*s >> 8) * (1.0f / 16777216.0f); }
 static inline void lfo_set(lfo *o, float phase_t, float hz) { o->s = sin_t(phase_t), o->c = cos_t(phase_t), o->e = TWO_PI * hz / FS; }
@@ -150,7 +152,7 @@ static void targets(nb *s, const float *p) {
   for (int k = 0; k < 4; ++k) s->seen[k] = p[k];
   float t60 = 0.5f * exp2_(7.0f * clampf(p[0], 0.0f, 127.0f) / 127.0f);
   for (int i = 0; i < LINES; ++i)   /* 10^(-3 n / (T60 fs)) */
-    s->gain_t[i] = exp2_(-9.96578f * (s->len[i] + (float)k_lap[i]) / (t60 * FS));
+    s->gain_t[i] = exp2_(-9.96578f * (s->len[i] + 34.0f + (float)k_lap[i]) / (t60 * FS));
   /* the pad lets go with the reverb: a quarter of the decay time, 0.2 s .. 3 s */
   s->rel = 1.0f - exp2_(-(float)CTL / (clampf(0.25f * t60, 0.2f, 3.0f) * FS) * 1.44269504f);
   s->ens_t = clampf(p[1], 0.0f, 127.0f) / 127.0f;
@@ -179,7 +181,10 @@ static void control(nb *s) {
     float pk = nbr > 0.0f ? clampf((a[k] / nbr - 1.0f) * 4.0f, 0.0f, 1.0f) : 1.0f;
     float target = a[k] * (a[k] / top) * pk;
     s->lvl[k] += (target > s->lvl[k] ? s->atk : s->rel) * (target - s->lvl[k]);
-    if (s->lvl[k] < 1e-7f) s->lvl[k] = 0.0f;
+    if (s->lvl[k] < 1e-7f) {
+      s->lvl[k] = 0.0f;
+      if (s->amp[k] < 1e-7f) s->amp[k] = 0.0f;   /* (its own one-pole would stop at a denormal) */
+    }
     /* the band's real frequency, only while it is driven (a ringing-out resonator drifts to its own centre): the
        turn since 16 frames ago, less the centre's own turn, is small: its angle by the arctangent's series */
     if (a[k] > 1e-4f && target >= 0.5f * s->lvl[k]) {
@@ -198,7 +203,7 @@ static void control(nb *s) {
     s->gain[i] += 0.02f * (s->gain_t[i] - s->gain[i]);
     s->lp[i] = flush(s->lp[i]), s->hp[i] = flush(s->hp[i]);
   }
-  s->ens += 0.02f * (s->ens_t - s->ens), s->damp += 0.02f * (s->damp_t - s->damp), s->mod += 0.02f * (s->mod_t - s->mod);
+  s->ens = glide(s->ens, s->ens_t), s->damp = glide(s->damp, s->damp_t), s->mod = glide(s->mod, s->mod_t);
   /* the coupled sines keep their size only nearly: pulled back to 1 */
   float n1 = 1.5f - 0.5f * (s->c1.s * s->c1.s + s->c1.c * s->c1.c), n2 = 1.5f - 0.5f * (s->c2.s * s->c2.s + s->c2.c * s->c2.c);
   s->c1.s *= n1, s->c1.c *= n1, s->c2.s *= n2, s->c2.c *= n2;
@@ -217,9 +222,16 @@ static void nb_render(void *st, const rmp3_block *b) {
   for (int32_t i = 0; i < b->n; ++i) {
     float x = b->in[0] ? b->in[0][i] : 0.0f;
     if (b->in[1]) x = 0.5f * (x + b->in[1][i]);
+    if (!(x == x)) x = 0.0f;   /* (a NaN would stay in the lines for good) */
     /* ---- the ensemble */
     float pl = 0.0f, pr = 0.0f;
-    if (s->ens > 0.0005f || s->ens_t > 0.0f) {
+    int ens_on = s->ens > 0.0005f || s->ens_t > 0.0f;
+    if (!ens_on && s->ens_on) {   /* ENS reached 0: forget the pad, so that ENS up again starts from what plays then */
+      for (int k = 0; k < BANDS; ++k) s->zr[k] = s->zi[k] = s->pr[k] = s->pi[k] = s->lvl[k] = s->amp[k] = 0.0f;
+      for (uint32_t k = 0; k <= s->ch.mask; ++k) s->ch.b[k] = 0.0f;
+    }
+    s->ens_on = ens_on;
+    if (ens_on) {
       for (int k = 0; k < BANDS; ++k) {
         float zr = s->zr[k] * s->cr[k] - s->zi[k] * s->ci[k] + x * s->ing[k], zi = s->zr[k] * s->ci[k] + s->zi[k] * s->cr[k];
         s->zr[k] = zr, s->zi[k] = zi;

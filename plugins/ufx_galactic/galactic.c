@@ -89,7 +89,7 @@ static void gx_render(void *st, const rmp3_block *b) {
          pc = clampd(p[2], 0.0, 127.0) / 127.0, pd = clampd(p[3], 0.0, 127.0) / 127.0;
   double regen = 0.0625 + ((1.0 - pa) * 0.0625);
   double attenuate = (1.0 - (regen / 0.125)) * 1.333;
-  double lowpass = (1.00001 - (1.0 - pb)) * (1.00001 - (1.0 - pb)) / 1.0433122;   /* / sqrt(48000 / 44100) */
+  double lowpass = (1.00001 - (1.0 - pb)) * (1.00001 - (1.0 - pb)) / 1.0432810619;   /* / sqrt(48000 / 44100) */
   double drift = pc * pc * pc * 0.001;
   double size = (pd * 1.77) + 0.1;
   for (int i = 0; i < 12; ++i) s->delay[i] = (int)(k_time[i] * size);
@@ -98,11 +98,10 @@ static void gx_render(void *st, const rmp3_block *b) {
   for (int32_t n = 0; n < b->n; ++n) {
     double x = b->in[0] ? b->in[0][n] : 0.0;
     if (b->in[1]) x = 0.5 * (x + b->in[1][n]);
+    if (!(x == x)) x = 0.0;   /* (a NaN would stay in the tank for good) */
     double in[2] = {x, x};
-    for (int c = 0; c < 2; ++c) {
+    for (int c = 0; c < 2; ++c)
       if (in[c] > -1.18e-23 && in[c] < 1.18e-23) in[c] = s->fpd[c] * 1.18e-17;
-      s->fpd[c] ^= s->fpd[c] << 13, s->fpd[c] ^= s->fpd[c] >> 17, s->fpd[c] ^= s->fpd[c] << 5;   /* (Galactic: in its dither) */
-    }
     s->vibM += (s->oldfpd * drift);
     if (s->vibM > (3.141592653589793238 * 2.0)) {
       s->vibM = 0.0;
@@ -150,6 +149,8 @@ static void gx_render(void *st, const rmp3_block *b) {
       s->iirB[c] = (s->iirB[c] * (1.0 - lowpass)) + ((sum / 8.0) * lowpass);   /* the end filter */
       out[c] = s->iirB[c] * OUT_GAIN;
     }
+    for (int c = 0; c < 2; ++c)   /* the random numbers step at the end of a frame (Galactic: in its dither) */
+      s->fpd[c] ^= s->fpd[c] << 13, s->fpd[c] ^= s->fpd[c] >> 17, s->fpd[c] ^= s->fpd[c] << 5;
     if (r) l[n] = (float)out[0], r[n] = (float)out[1];
     else l[n] = (float)(0.5 * (out[0] + out[1]));   /* a mono route: the mix */
   }
