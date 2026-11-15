@@ -252,7 +252,7 @@ int main() {
   // transport, pads, FUNC, TEMPO, MUTE, the trig and bank keys pass
   CHECK(masks_in == 1 && mask_enc == 0x1FF && caught(0x70) && caught(0x77) && caught(0x78) &&
         caught(0x41) && caught(0x45) && caught(0x84) && caught(0x44) &&
-        caught(0x34) && caught(0xB0) && caught(0x86) && !caught(0x51) && !caught(0x52) && !caught(0x50) &&
+        caught(0x34) && caught(0xB0) && !caught(0x86) && !caught(0x51) && !caught(0x52) && !caught(0x50) &&
         !caught(0x90) && !caught(0x9B) && !caught(0x80) && !caught(0x83) && !caught(0x11) && !caught(0x00) &&
         !caught(0xC0));
   reset_counts();
@@ -1084,7 +1084,7 @@ int main() {
     png("keys_2_combos.png");
     for (int i = 0; i < 60; ++i) from_rytm(0x31, 0, 0x43, 1), from_rytm(0x31, 0, 0x43, 0);   // DOWN to the end: the legacy forms
     remote_tick(t += 30);
-    CHECK(shown_text("TRK+TRIG") && shown_text("= UP+TRIG") && shown_text("T+FUNC+PLAY") && shown_text("= T+UP+PLAY"));
+    CHECK(!shown_text("TRK+TRIG") && !shown_text("TRK+YES") && shown_text("T+FUNC+PLAY") && shown_text("= T+UP+PLAY"));   // 0.5.0: no TRK forms
     png("keys_3_legacy.png");
     from_rytm(0x31, 0, 0x45, 1), from_rytm(0x31, 0, 0x45, 0);   // NO: SIDECAR
     remote_tick(t += 30);
@@ -1160,6 +1160,7 @@ int main() {
         from_rytm(0x31, 0, 0x41, 1), from_rytm(0x31, 0, 0x41, 0);   // RIGHT round the ring
         remote_tick(t += 30);
         CHECK(!remote_page_title() || (!sc_shortcut_only(remote_page_title()) && strcmp(remote_page_title(), "LFO")));   // ux1027
+        CHECK(!caught(0x86));   // 0.5.0: no page catches TRK (stock's: its TRK + pad selection and pad highlight)
       }
       from_rytm(0x30, 0, 0, 1);
       auto no = [&]() { from_rytm(0x31, 0, 0x45, 1), from_rytm(0x31, 0, 0x45, 0); remote_tick(t += 30); };

@@ -78,7 +78,7 @@ CORE_COLD const char* shortcut(const char* page, char* b, int cap) {
   return nullptr;
 }
 
-// KEYS' rows: the page requests, the combos, then the legacy forms ("TRK+TRIG" "= UP+TRIG")
+// KEYS' rows: the page requests, the combos, then the legacy forms ("T+FUNC+REC" "= T+UP+REC")
 CORE_COLD int keys_rows() {
   const sc_keymap_t* m = sc_keymap();
   int n = m->npages + m->ncombos;

@@ -76,13 +76,15 @@ enum : int { kKeyLeft = 0x40, kKeyRight = 0x41, kKeyUp = 0x42, kKeyDown = 0x43, 
 // trig and bank keys, MUTE / CHRO / SCNE / PERF, FIX, RTRG, FILL, FUNC, TEMPO, and on a voice page the LEVEL knob
 // and its push and an encoder the page does not use (the status pages catch every knob); RECORD / PLAY / STOP are the Rytm's whatever the mask says). Every page takes the
 // navigation keys and the keys that open or change a stock screen (rytm-mods 0026 design.md section 10: the screen
-// would change under the page), plus the encoders it uses and their pushes. TRK too: a second TRK within ~1 s opens a
-// stock screen, which leaving by TRK + YES soon after a TRK on the page would do.
+// would change under the page), plus the encoders it uses and their pushes. Not TRK (0.5.0, owner: "UP is now the
+// Sidecar key"): the first version's TRK shortcuts are gone from the host's keys, and TRK is stock's again, so TRK +
+// pad is stock's own selection and stock lights the pads while it is held (a quick second TRK can change the stock
+// main screen under the page: cosmetic; UP + YES leaves without it). Before the first mask every key is still caught:
+// poly::rytm_trk (31 0x86) covers that.
 constexpr uint8_t kCatchKeys[] = {
     0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x84,   // LEFT RIGHT UP DOWN YES NO PAGE
     0x30, 0x31, 0x32, 0x33, 0x34, 0x35,         // TRIG SRC SMPL FLTR AMP LFO (the stock pages)
     0x10, 0xB0, 0xB4, 0xB5, 0xB1, 0x81, 0x82,   // FX GLOBAL SAMPLER PLAYMODE QPER SONG CHAIN
-    0x86,                                       // TRK
 };
 constexpr uint8_t kKeyPushA = 0x70;   // PUSH_A .. PUSH_H 0x70..0x77
 constexpr int kEncData = 8;           // LEVEL / DATA (its push kKeyPushA + 8 = 0x78)
