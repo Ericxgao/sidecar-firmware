@@ -198,9 +198,11 @@ CORE_COLD void list(Canvas& c, const Rect& r, const char* names, int sel, int sl
   sel = clamp(sel, 0, n > 0 ? n - 1 : 0);
   int cx = r.x + r.w / 2;
   // where the dial is, kept on the screen: an 8-letter name centred in an edge cell (40 px at the widest advance in
-  // the 32 px of column 0) would start left of x 0, and the Rytm drops a glyph that starts off the screen
+  // the 32 px of column 0) would start left of x 0, and the Rytm drops a glyph that starts off the screen. A pixel of
+  // margin each side (however the Rytm rounds its centring); a name wider than the screen: centred on it
   const char* name = n ? list_name(names, sel) : "-";
-  int w = (int)strlen(name) * kRSmall.advance - 1, tx = clamp(cx, w / 2, kW - w + w / 2);
+  int w = (int)strlen(name) * kRSmall.advance - 1, lo = w / 2 + 1, hi = kW - 1 - w + w / 2;
+  int tx = lo <= hi ? clamp(cx, lo, hi) : kW / 2;
   c.put_text(slot, kRSmall, tx, r.y + 7, name, kAlignCentre);
   if (n > 1) {   // the track: the whole list under the text, the selection's place solid
     int x0 = cx - 10, w = 21, y = r.y + 14;

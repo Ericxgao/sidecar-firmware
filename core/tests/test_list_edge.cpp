@@ -23,7 +23,7 @@ int main() {
       const TextItem& t = c.txt[0];
       int w = (int)strlen(t.s) * kRSmall.advance - 1;
       CHECK(!strcmp(t.s, list_name(names, sel)));
-      CHECK(text_left(t, w) >= 0 && text_left(t, w) + w <= kW);   // on the screen, both edges
+      CHECK(text_left(t, w) >= 1 && text_left(t, w) + w <= kW - 1);   // on the screen with a pixel to spare, both edges
       if (col == 0 && sel == 4) CHECK(t.x == 16);                 // a short name: centred in its cell as before
     }
   // the check: a centred 8-letter name at x 16 (as list() drew it) is reported, the same name at x 20 is not
