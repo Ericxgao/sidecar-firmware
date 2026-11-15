@@ -502,6 +502,37 @@ UI_ROM const ExtraPage kChopPage = {"CHOP", ed_shown, ed_draw, ed_enc, ed_key, 0
 
 CORE_COLD uint32_t chop_key(const Cell& c, const Source& s) { return src_key(c, s); }
 CORE_COLD void chop_draw(Canvas& cv, const Rect& r, const Cell& c, const Source& s, int slot) { src_draw(cv, r, c, s, slot); }
+// the SRC view as a whole screen (page_wave.cpp voice_screen): the title bar (the turned knob's whole name), the line with the
+// slice and the outline as they were, the dials, the touched label inverted, the bottom bar
+CORE_COLD void chop_src_screen(Canvas& c, const Page& p, const Source& s, const char* right, int page, int npages, int touched, bool src_view) {
+  static const char* const kFull[8] = {"SAMPLE", "SLICE", "TUNE", "MORPH", "SEED", "NEIGHBOUR CHANCE", "VELOCITY", "LEVEL"};
+  c.clear();
+  header(c, touched >= 0 ? kFull[touched] : p.title, page, npages, right);
+  Rect r = cell(0, 0, 4, 1);
+  src_draw(c, r, kChopSrcCells[0], s, kSlotCells);
+  for (int e = 0; e < 4; ++e) cell_label(c, e, 0, p.label[e], touched == e);
+  for (int e = 4; e < 8; ++e) cell_label(c, e - 4, 1, p.label[e], touched == e);
+  dial(c, 0, 1, s.param(4));
+  fader(c, 1, 1, s.param(5));
+  dial(c, 2, 1, s.param(6));
+  fader(c, 3, 1, s.param(7));
+  int e = touched >= 0 ? touched : (src_view ? -1 : 0);
+  if (e < 0) {
+    footer_keys(c, "PUSH A", "LIST", "PUSH B", "EDIT");   // the SRC view's pushes: A the list, B (to H) the editor
+    return;
+  }
+  const int k = p.enc[e], v = s.param(k);
+  char b[24];
+  if (const char* nm = src_value_name(p, k, s)) name_fit(b, sizeof b, nm, 11);
+  else if (e == 1) {   // the slice as the line over the outline says it
+    int vi = s.voice() < 0 ? 0 : s.voice() & 7;
+    const chop::Map* m = chop::map_of(vi);
+    if (m && m->n) sniprintf(b, sizeof b, CORE_STR("%d/%d"), clampi(eng_zone((float)v, 64), 0, 64) % m->n + 1, m->n);
+    else sniprintf(b, sizeof b, CORE_STR("%d"), v);
+  } else sniprintf(b, sizeof b, CORE_STR("%d"), v);
+  footer_value(c, p.label[e], v, false, b);
+}
+
 CORE_COLD void chop_page_open(int track) {
   ed.on = true, ed.track = track >= 0 && track < 12 ? track : -1, ed.touched = -1, ed.view = 0;
   ed.all = ed.up_down = ed.up_clean = false;   // (the editor opens on ONE slice)

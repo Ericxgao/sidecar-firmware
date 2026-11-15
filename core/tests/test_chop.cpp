@@ -1142,6 +1142,29 @@ static void test_pages() {
   CHECK(ui::remote_render(1, vi, nullptr, c));   // the voice's page: the SRC view's
   ui::preview(c, fb);
   rui_png(dir, "chop_src.png", fb);
+  {   // 0.5.0 screens: the SRC view whole (ui::voice_screen): the title bar, the slice line and outline as they were, the dials,
+      // the labels, the bottom bar (idle: the pushes; touched: the knob's name in full, a bar, its value: SLC as 4/n)
+    ScrSource ss;
+    ss.p[0] = C("A001"), ss.p[1] = slc_v(3), ss.p[4] = 64, ss.p[5] = 100, ss.p[6] = 90, ss.p[7] = 110;
+    ui::PageView pv;
+    int d = 0;
+    CHECK(ui::voice_screen(c, pv, ui::kChopSrcPage, ss, "BD", 0, 0, -1, true, &d) && d > 0 && scr_items(c) < 64);
+    CHECK(!strcmp(c.txt[ui::kSlotTitle].s, "CHOP") && !strcmp(c.txt[ui::kSlotRight].s, "BD") && !strncmp(c.txt[ui::kSlotCells].s, "SLICE 4/", 8));
+    const char* nm[8] = {"SRC", "SLC", "TUNE", "MRPH", "SEED", "NBR", "VEL", "LEV"};
+    for (int e = 0; e < 8; ++e) CHECK(!strcmp(c.txt[ui::kSlotLabels + e].s, nm[e]) && c.txt[ui::kSlotLabels + e].y == (e < 4 ? 26 : 48));
+    CHECK(!strcmp(c.txt[ui::kSlotFoot].s, "PUSH A") && !strcmp(c.txt[ui::kSlotFoot + 1].s, "LIST") && !strcmp(c.txt[ui::kSlotFoot + 2].s, "PUSH B") &&
+          !strcmp(c.txt[ui::kSlotFoot + 3].s, "EDIT"));
+    scr_shot("chop_src_idle.png", c);
+    CHECK(ui::voice_screen(c, pv, ui::kChopSrcPage, ss, "BD", 0, 0, 1, true, &d));
+    char want[16];
+    snprintf(want, sizeof want, "4/%d", chop::slices(vi));
+    CHECK(!strcmp(c.txt[ui::kSlotTitle].s, "SLICE") && (c.txt[ui::kSlotLabels + 1].flags & ui::kTextInvert) && !strcmp(c.txt[ui::kSlotFoot].s, "SLC") &&
+          !strcmp(c.txt[ui::kSlotFoot + 1].s, want));
+    scr_shot("chop_src_turning_slc.png", c);
+    CHECK(ui::voice_screen(c, pv, ui::kChopSrcPage, ss, "BD", 0, 0, 5, true, &d) && !strcmp(c.txt[ui::kSlotTitle].s, "NEIGHBOUR CHANCE") &&
+          !strcmp(c.txt[ui::kSlotFoot + 1].s, "100"));
+    CHECK(ui::voice_screen_echo_slot(&ui::kChopSrcPage, 1) == 0 && ui::voice_screen_echo_slot(&ui::kChopSrcPage, 5) == ui::kSlotFoot + 1);
+  }
   int k = extra_index("CHOP");
   CHECK(k >= 0 && ui::extra_page(k).off_ring && ui::extra_page(k).shown());
   const char* names[] = {"chop_edit.png", "chop_slice1.png", "chop_slice2.png", "chop_slice3.png"};

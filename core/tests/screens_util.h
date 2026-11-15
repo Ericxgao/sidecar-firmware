@@ -26,3 +26,12 @@ inline void scr_shot(const char* name, const core::ui::Canvas& c) {
   core::ui::preview(c, fb);
   rui_png(dir, name, fb);
 }
+
+// a Source for the voice pages' tests: P1..P16 as set, voice 0
+#include "ui/page.h"
+struct ScrSource : core::ui::Source {
+  int p[16] = {};
+  int vi = 0;
+  int param(int k) const override { return p[k & 15]; }
+  int voice() const override { return vi; }
+};

@@ -82,6 +82,38 @@ CORE_COLD void dotted_v(Canvas& c, int x, int y0, int y1) {
   for (int y = y0; y <= y1; y += 2) c.pixel(x, y);
 }
 
+CORE_COLD void cell_label(Canvas& c, int col, int row, const char* s, bool touched) {
+  const int x = col * kCellW + kCellW / 2, y = row ? 48 : 26, e = row * 4 + col;
+  if (!s || !*s) {
+    c.put_text(kSlotLabels + e, kRSmall, 0, 0, nullptr);
+    return;
+  }
+  if (touched) {
+    int w = (int)strlen(s) * kRSmall.advance + 3;
+    c.fill(Rect{(int16_t)(x - w / 2), (int16_t)(y - 1), (int16_t)w, 7});
+  }
+  c.put_text(kSlotLabels + e, kRSmall, x, y, s, (uint8_t)(kAlignCentre | (touched ? kTextInvert : 0)));
+}
+
+CORE_COLD void dial(Canvas& c, int col, int row, int v, bool bipolar) {
+  knob(c, cell(col, row), v, bipolar);
+  const int x = col * kCellW + kCellW / 2, y = row ? 33 : 11;
+  c.hline(x - 10, x - 8, y + 11);   // the minimum: a minus
+  c.hline(x + 8, x + 10, y + 11), c.vline(x + 9, y + 10, y + 12);   // the maximum: a plus
+}
+
+CORE_COLD void fader(Canvas& c, int col, int row, int v) {
+  bar(c, cell(col, row), v);
+  const int x = col * kCellW + kCellW / 2, y = row ? 33 : 11;
+  for (int i = 0; i < 3; ++i) c.hline(x - 8, x - 7, y + 2 + 4 * i), c.hline(x + 7, x + 8, y + 2 + 4 * i);
+}
+
+CORE_COLD void box_word(Canvas& c, int slot, int col, int row, const char* s, int w) {
+  const int x = col * kCellW + kCellW / 2, y = row ? 33 : 11;
+  c.rect(Rect{(int16_t)(x - w / 2), (int16_t)(y + 1), (int16_t)w, 11});
+  c.put_text(slot, kRSmall, x, y + 4, s, kAlignCentre);
+}
+
 static CORE_COLD void foot_frame(Canvas& c) {
   c.unclip();
   c.fill(Rect{0, kFooterY, kW, kFooterH}, kOn);

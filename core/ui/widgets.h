@@ -39,6 +39,13 @@ void footer_keys(Canvas& c, const char* k1, const char* w1, const char* k2, cons
 void footer_value(Canvas& c, const char* name, int v, bool bipolar, const char* value);
 void dotted_h(Canvas& c, int x0, int x1, int y);
 void dotted_v(Canvas& c, int x, int y0, int y1);
+// 0.5.0 screens, cells of the grid (col 0..3, row 0..1): cell_label: an encoder's name centred in the cell's label row (text
+// slot kSlotLabels + the encoder), inverted on a filled box while it is the one turned; dial: knob() with its minimum and
+// maximum marks; fader: bar() with ticks either side; box_word: a word in an outlined box (a mode, as a list's value).
+void cell_label(Canvas& c, int col, int row, const char* s, bool touched);
+void dial(Canvas& c, int col, int row, int v, bool bipolar = false);
+void fader(Canvas& c, int col, int row, int v);
+void box_word(Canvas& c, int slot, int col, int row, const char* s, int w = 28);
 // Text in up to n lines (slots slot..slot + n - 1, rows y, y + dy ..), broken at spaces so each line fits the screen at
 // kRSmall's widest advance from x (flags' alignment as put_text's). A word too long for a line is cut there (the
 // text-fit check reports it). Returns the lines used; the slots after them are emptied.
