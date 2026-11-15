@@ -142,16 +142,31 @@ CORE_COLD bool is_list(const Page& p, int param) {
 namespace {
 struct Detent {
   const void* key = nullptr;   // the parameter holding the centre (null: none)
+  int scope = 0;               // ... of which voice (detent_scope)
   int acc = 0;                 // the counts pushed into the detent since it caught, signed as the turns
+  uint32_t ms = 0;             // the last turn into it
 };
 Detent detents[9];   // A..H, DATA
+int g_scope = 0;
+constexpr uint32_t kDetentIdleMs = 1500;   // left alone this long, the detent holds again from its centre
 }  // namespace
+
+CORE_COLD void detent_scope(int scope) { g_scope = scope; }
+CORE_COLD void detent_reset() {
+  for (Detent& d : detents) d = Detent();
+}
 
 CORE_COLD int detent_step(int e, const void* key, int v, int step, int neutral) {
   Detent& d = detents[e < 0 || e > 8 ? 8 : e];
   if (!step) return v;
   if (v == neutral) {   // held on the centre (landed there, or found there): the turns push into the detent
-    if (d.key != key) d.key = key, d.acc = 0;
+    const uint32_t now = now_ms();
+    if (d.key != key || d.scope != g_scope || now - d.ms >= kDetentIdleMs) d.key = key, d.scope = g_scope, d.acc = 0;
+    d.ms = now;
+    if (step >= kCoarseStep || step <= -kCoarseStep) {   // FUNC: a coarse step leaves the centre whole (a tune's octave stays one)
+      d.key = nullptr, d.acc = 0;
+      return neutral + step;
+    }
     d.acc += step;
     if (d.acc >= -kDetentCounts && d.acc <= kDetentCounts) return neutral;
     const int out = d.acc > 0 ? neutral + d.acc - kDetentCounts : neutral + d.acc + kDetentCounts;
@@ -160,7 +175,7 @@ CORE_COLD int detent_step(int e, const void* key, int v, int step, int neutral) 
   }
   const int nv = v + step;
   if ((v < neutral && nv >= neutral) || (v > neutral && nv <= neutral)) {   // crosses or lands: stops
-    d.key = key, d.acc = 0;
+    d.key = key, d.scope = g_scope, d.acc = 0, d.ms = now_ms();
     return neutral;
   }
   if (d.key == key) d.key = nullptr;

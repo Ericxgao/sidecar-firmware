@@ -91,6 +91,8 @@ constexpr int kCoarseStep = 8, kOctaveStep = 12;
 // `neutral`; key names the parameter (a page's cell, any address that is the parameter's alone: moving to another one
 // starts the detent over)
 int detent_step(int e, const void* key, int v, int step, int neutral);
+void detent_scope(int scope);   // whose parameters the next detent_step calls are (the voice shown): another one starts it over
+void detent_reset();            // tests, remote_reset
 inline const void* detent_tag(int id) { return (const void*)(intptr_t)(id + 1); }   // a code page's parameter, by a number of its own
 // A list knob, the one rule for every list, enumerated value and switch on the Rytm's encoders (core/ui/README.md, "List
 // knobs"). delta is raw panel counts: the Rytm reports a knob's sum about every 67 ms, so size and timing of a report say

@@ -107,6 +107,13 @@ static void test_func_coarse() {
   at(g_us + 1000);
   turn(6, -1, true);
   CHECK(v[0].p[6] == 40);
+  // an octave from the centre is an octave (the detent does not eat its counts), and the other direction too
+  plaits_page(64);
+  turn(6, 1, true);
+  CHECK(v[0].p[6] == 76);
+  at(g_us + 1000);
+  turn(6, -1, true);
+  CHECK(v[0].p[6] == 64);   // (back to the centre: it lands)
   // the REC page's playback level (knob D) as well
   remote_play(PlayInfo{});
   PlayInput in;
@@ -115,6 +122,14 @@ static void test_func_coarse() {
 }
 
 // the code pages take the same detent: the LFO page's DEPTH (knob D of its main view, -64..63, 0 none)
+static void test_detent_idle() {   // a half-pushed detent is forgotten when the knob is left alone
+  plaits_page(63);
+  turn(6, 1), turn(6, 1), turn(6, 1);   // 64, acc 2
+  at(g_us + 2000000);
+  for (int i = 0; i < kDetentCounts; ++i) turn(6, 1);
+  CHECK(v[0].p[6] == 64);
+}
+
 static void test_detent_lfo() {
   lfo_page_reset();
   lfo::Settings st = lfo::get(0);
@@ -225,6 +240,13 @@ static void test_repeat() {
   key(5, true);
   CHECK(!remote_key_repeating());
   key(5, false), key(kDown, false);
+  // a modifier let go while a key repeats stops it as well
+  open_menu();
+  key(5, true), key(kDown, true), hold_ms(300);
+  CHECK(remote_key_repeating());
+  key(5, false);
+  CHECK(!remote_key_repeating());
+  key(kDown, false);
   // a page change stops it
   open_menu();
   key(kDown, true), hold_ms(300);
@@ -259,7 +281,7 @@ int main() {
   hooks.to_rytm = out;
   at(g_us);
   CHECK(engine_begin());
-  struct { const char* name; void (*fn)(); } tests[] = {{"detent", test_detent}, {"detent_lfo", test_detent_lfo}, {"func", test_func_coarse}, {"up_scrolls", test_up_scrolls}, {"repeat", test_repeat}};
+  struct { const char* name; void (*fn)(); } tests[] = {{"detent", test_detent}, {"detent_lfo", test_detent_lfo}, {"detent_idle", test_detent_idle}, {"func", test_func_coarse}, {"up_scrolls", test_up_scrolls}, {"repeat", test_repeat}};
   for (auto& t : tests) printf("-- %s\n", t.name), fflush(stdout), t.fn();
   remote_reset();
   system((std::string("rm -rf '") + tmpl + "'").c_str());

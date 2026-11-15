@@ -720,6 +720,7 @@ CORE_COLD void on_enc(int e, int delta, bool func) {
   const Page* p = page_for_voice(named_machine(machine_of_voice(s.voice), s.voice), s.voice);
   if (!p || p->enc[e] == kNone) return;
   int k = p->enc[e] & 15, cur = (int)mod::base_of(s.voice, k, v[s.voice].p[k]);
+  detent_scope(s.voice);
   if (is_list(*p, k)) delta = list_turn(e, delta);
   if (!delta) return;
   if (lock) {   // EDIT: the scene's lock, from its value (else the base), never the voice
@@ -1658,7 +1659,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       if (n < 3) break;
       s.stats.keys++;
       s.user = true;
-      if (b[2] || (b[0] << 7 | b[1]) == s.rep_code) s.rep_code = -1;   // 0.5.0: another key pressed, or the repeating one let go
+      s.rep_code = -1;   // 0.5.0: any key event stops a repeat (a modifier let go too); a page that takes the press starts it again
       if (b[2]) popup_key_closed();
       // the pairing code's modal over an open page: a key takes it off (the user has read it) and does nothing else;
       // its release is eaten too, so the page does not see half a press. (With the page closed no key reaches us: the
@@ -2028,7 +2029,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 // the key (the end of its list: false), and after kRepeatCapMs, so a release lost with the link cannot repeat for ever.
 static CORE_COLD void key_repeat_tick(uint32_t ms) {
   const ExtraPage* x = s.open ? extra_of(s.voice) : nullptr;
-  if (!x || !x->key || s.voice != s.rep_voice || ms - s.rep_t0 >= (uint32_t)kRepeatCapMs) {
+  if (!x || !x->key || (x->shown && !x->shown()) || s.voice != s.rep_voice || ms - s.rep_t0 >= (uint32_t)kRepeatCapMs) {
     s.rep_code = -1;
     return;
   }
@@ -2437,6 +2438,7 @@ CORE_COLD bool remote_key_repeating() { return s.rep_code >= 0; }
 
 CORE_COLD void remote_reset() {
   s = State();
+  detent_reset();
   memset(reported, 0, sizeof reported);
   memset(track_smpl, 0, sizeof track_smpl);
   have_tracks = false, tracks_known = 0;
