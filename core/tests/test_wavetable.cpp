@@ -425,10 +425,9 @@ static void test_retry_release() {
   wg::write_file(W + "/late.wav", tone(7));
   CHECK(pu::put(pools::kTables, "A011", "/WAVETABLES/t5.wav") == pools::kOk);
   CHECK(pu::put(pools::kTables, "A012", "/WAVETABLES/t6.wav") == pools::kOk);
-  CHECK(pu::put(pools::kTables, "A013", "/WAVETABLES/late.wav") == pools::kOk);
   idle();
-  const int t5 = entry("t5"), t6 = entry("t6"), late = entry("late");
-  CHECK(t5 > 0 && t6 > 0 && late > 0);
+  const int t5 = entry("t5"), t6 = entry("t6");
+  CHECK(t5 > 0 && t6 > 0);
   // four voices on four card tables: every slot selected
   const int four[4] = {entry("harm"), entry("clm256"), entry("akwf600"), t5};
   for (int vi = 0; vi < 4; ++vi) wg::params(kW, vi, P((float)four[vi], 0));
@@ -436,10 +435,21 @@ static void test_retry_release() {
   for (int vi = 0; vi < 4; ++vi) CHECK(wt::table_frames(four[vi]) > 0 && wt::voice_entry(vi) == four[vi]);
   // they leave WAVETABLE (PLAITS): a fifth table on voice 4 loads into a slot they gave back
   for (int vi = 0; vi < 4; ++vi) wg::params(kPlaits, vi, {0, 64, 64, 64, 64, 64, 64, 100, 64, 64, 0, 0, 0, 120, 0, 100});
+  // a pool change after they left (the list composed again, every voice's selection redone) does not take them back
+  CHECK(pu::put(pools::kTables, "A013", "/WAVETABLES/late.wav") == pools::kOk);
+  idle();
+  const int late = entry("late");
+  CHECK(late > 0);
+  for (int vi = 0; vi < 4; ++vi) CHECK(wt::voice_entry(vi) == -1);
   wg::params(kW, 4, P((float)t6, 0));
   idle();
   CHECK(wt::table_frames(t6) > 0 && wt::voice_entry(4) == t6);
-  // a load that fails (the file cannot be opened), the log says so, the old table plays on
+  // a load that fails (the file cannot be opened), the log says so, the old table plays on (root opens any file:
+  // the case needs a user)
+  if (geteuid() == 0) {
+    wt::reset();
+    return;
+  }
   CHECK(chmod((W + "/late.wav").c_str(), 0) == 0);
   uint32_t fails = wt::stats().load_fails;
   wg::params(kW, 5, P((float)late, 0));

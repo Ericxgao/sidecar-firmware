@@ -207,7 +207,8 @@ CORE_COLD void set_knobs(int vi) {
 CORE_COLD void select(int vi) {
   int e = srclib::code_of(vp[vi][0]);   // the pool row: bank * 128 + row
   if (!list || e < 0 || e >= nlist) return;
-  if (v[vi].wt || force[vi]) pools::voice_on(pools::kTables, vi, e);
+  if (!(v[vi].wt || force[vi])) return;   // not on WAVETABLE (left it: leave()): no selection, no card slot (a compose)
+  pools::voice_on(pools::kTables, vi, e);
   // a table that failed to load, picked again (TBL away and back): tried again (the card was busy, the file is
   // fixed); the same TBL at every report or trig does not reload it
   if (e != want[vi] && failed[e]) failed[e] = 0, why[e] = 0;
