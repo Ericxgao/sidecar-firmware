@@ -4707,15 +4707,17 @@ CORE_COLD void view_request(int r) {
 }
 CORE_COLD void selected_track(int t) {
   if (!cur) reset();
-  if (t < 0 || t >= kRytmTracks || t == ui.track || ui.prompt) return;
+  // (a make or explain prompt follows too, "Follow, never close"; the menu, restore and off questions wait for their answer)
+  if (t < 0 || t >= kRytmTracks || t == ui.track) return;
+  if (ui.prompt && !(seq_shown() && (ui.prompt == kPromptMake || ui.prompt == kPromptExplain))) return;
   ui.held = 0, ui.page_held = false, ui.lockpg = -1, ui.touched = -1, ui.cond_e = -1, ui.push_down = 0, ui.func = false, ui.msg_ms = 0;
   if (in_mask(t)) {
-    ui.track = t, ui.page = 0;
+    ui.track = t, ui.page = 0, ui.prompt = 0;
     return;
   }
-  // 0.5.0 (TRK + pad on an open page; owner: whoever opened it, TRK + TRIG, seq mode, the ring, UP + T2): the SEQ page
-  // follows with that track's make or explain prompt, as TRK + TRIG would (a track on the Rytm's own synth: remote.cpp
-  // closes the page; NO on a prompt TRK + TRIG opened closes it as before)
+  // 0.5.0 (a selection on an open page; owner: whoever opened it, TRK + TRIG, seq mode, the ring, UP + T2; "Follow, never
+  // close"): the SEQ page follows with that track's make prompt, or its explain prompt on a track of the Rytm's own
+  // synth, as TRK + TRIG would (NO on a prompt TRK + TRIG opened closes it as before)
   if (!seq_shown()) return;
   if (seqmode) {   // seq mode's page: the Rytm leaves seq mode on a track that is no seq track (its 08 0 follows, then
     if (ui.ne) ne_leave();   // closing nothing); the page stays with the prompt, closed by NO as TRK + TRIG's is
