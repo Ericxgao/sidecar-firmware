@@ -48,6 +48,7 @@ bool forced(int vi);                 // wt=voice:V
 void report(int vi, int note, int vel, const float* p);
 void note_off(int vi);
 void silence(int vi);
+void leave(int vi);                  // the voice left WAVETABLE: silenced, its table no longer selected (a card slot freed)
 void render_add(int vi, float* out, int n);   // the render core's: the voice's notes added into out (-1..1)
 void live_on(int vi, int key, int vel, int ch, int mnote);
 void live_off(int vi, int ch, int mnote);
