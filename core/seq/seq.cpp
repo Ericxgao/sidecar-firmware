@@ -95,6 +95,16 @@ StepClock clk[kRytmTracks];
 bool restart[kRytmTracks];
 int64_t planned[kRytmTracks];   // the next step count to plan
 int64_t play_abs[kRytmTracks];  // the last tick's step count
+// P2: an SPD change mid-play continues from the step that was next (owner, 2026-11-15): planned[] keeps counting the
+// track's own steps on the Rytm's grid (timing), and the step that plays at count a is the one of count a + voff[r]
+// (vstep: map_step's count, the keyed RNG's, the loop behind A:B / 1ST). Set at a change (replan), 0 at PLAY and at a
+// pattern switch (restart_all, on_stop). vq: the ratio planned[] counts in (num 0: none yet).
+int64_t voff[kRytmTracks];
+Ratio vq[kRytmTracks];
+CORE_COLD int64_t vstep(int r, int64_t a) {
+  int64_t s = a + voff[r];
+  return s < 0 ? 0 : s;
+}
 uint64_t hframes = 0;
 int transport = kStop;
 // Every change of `transport` goes through here: the platform hears it as MIDI realtime (hooks.transport: the Pi's
@@ -1556,6 +1566,7 @@ CORE_COLD void update_prediction() {
   }
 }
 
+void replan(int r);
 CORE_COLD void plan() {
   if (transport != kPlay || !fol.valid) return;
   int64_t horizon = (int64_t)hframes + kBlock + kLookahead;
@@ -1572,6 +1583,8 @@ CORE_COLD void plan() {
     Track* nt = there ? track_of(*nxt, r, false) : nullptr;
     Ratio q = rat_of(t), nq = rat_of(nt);   // P2: the track's own step clock (1:1 FOLLOW)
     double per = c.period * q.den / q.num, nper = c.period * nq.den / nq.num;
+    if (t && vq[r].num && (vq[r].num != q.num || vq[r].den != q.den)) replan(r);   // (a ratio changed: continue from there)
+    if (t) vq[r] = q;
     int64_t v0 = vceil_i(q, c.abs);
     if (planned[r] < v0) planned[r] = v0;   // behind the Rytm (a jump, a late start): from its step on
     for (int guard = 0; guard < 32; ++guard) {
@@ -1589,7 +1602,7 @@ CORE_COLD void plan() {
       double fs = c.frame_of(x);
       int64_t earliest = fol.to_host((int64_t)(fs - per)) - latency;   // a note up to a step early
       if (earliest > horizon) break;
-      if (t) plan_step(*cur, *t, r, a, fs, per, false);
+      if (t) plan_step(*cur, *t, r, vstep(r, a), fs, per, false);   // (the step continued after an SPD change)
       planned[r] = a + 1;
     }
   }
@@ -1598,7 +1611,8 @@ CORE_COLD void plan() {
 int restart_skip[kRytmTracks];   // steps of the new pattern a confirmed prediction planned already (the restart's tick)
 CORE_COLD void restart_all() {
   ++seg_gen;   // R1b: a new segment (the predicted pattern's steps were planned in it already)
-  for (int r = 0; r < kRytmTracks; ++r) restart[r] = true, planned[r] = 0, play_abs[r] = 0, restart_skip[r] = 0;
+  for (int r = 0; r < kRytmTracks; ++r)
+    restart[r] = true, planned[r] = 0, play_abs[r] = 0, restart_skip[r] = 0, voff[r] = 0, vq[r] = Ratio{0, 1};
   pat_start = -1, pat_start_track = -1;
   memset(cond_last, 0, sizeof cond_last);   // rui1040: PRE / NEI start false at PLAY and at a switch
 }
@@ -1614,7 +1628,8 @@ CORE_COLD void on_stop() {
   drop_prediction(false);
   release(-1);
   unlock_all();   // seq-ux: every locked param back to its base
-  for (int r = 0; r < kRytmTracks; ++r) clk[r].reset(), restart[r] = true, planned[r] = 0, play_abs[r] = -1;
+  for (int r = 0; r < kRytmTracks; ++r)
+    clk[r].reset(), restart[r] = true, planned[r] = 0, play_abs[r] = -1, voff[r] = 0, vq[r] = Ratio{0, 1};
   for (Open& o : opens) o.used = false;
   if (dirty) save_now = true;
 }
@@ -1697,19 +1712,34 @@ CORE_COLD void on_switch(int to, const uint8_t* blk) {
 // one's go (by their step), the steps before keep theirs (seqtop: before, a replan between a step's start and its tick's
 // arrival - the tick comes up to a round trip late - planned that started step again, a second, late note). The
 // predicted next pattern's steps stay (an edit changes the current pattern only).
+// P2: a ratio changed since the last plan (SPD, either edit path: the knob, seq=spd): the first step on the new grid plays
+// the step that would have played next (voff), so the playhead continues instead of jumping to abs x the new ratio.
 CORE_COLD void replan(int r) {
   for (int t = 0; t < kRytmTracks; ++t) {
     if (r >= 0 && t != r) continue;
     StepClock& c = clk[t];
+    Ratio q = rat_of(track_of(*cur, t)), qo = vq[t];
+    bool moved = qo.num && (qo.num != q.num || qo.den != q.den);
     if (!c.on || c.period <= 0 || !fol.valid) {
       cancel_ons(t, (int64_t)hframes);
-      if (c.on) planned[t] = vfloor_i(rat_of(track_of(*cur, t)), c.abs) + 1;
+      if (c.on || moved) {   // (paused: the clock is off, the count kept; continue re-anchors from it)
+        int64_t v = vfloor_i(q, c.abs) + 1;
+        if (moved) voff[t] += vfloor_i(qo, c.abs) + 1 - v;
+        planned[t] = v;
+      }
+      if (moved) vq[t] = q;
       continue;
     }
-    Ratio q = rat_of(track_of(*cur, t));
     int64_t v = vceil_d(q, c.step_at((double)fol.to_rytm((int64_t)hframes + latency)));   // its micro-0 note not started
     int64_t v1 = vfloor_i(q, c.abs) + 1;
     if (v < v1) v = v1;
+    if (moved) {   // the old grid's next step: the first one not planned yet or cut below (its start at / after v's)
+      int64_t o = planned[t], o0 = vceil_i(qo, c.abs), oc = vceil_d(qo, vpos(q, v));
+      if (o < o0) o = o0;
+      if (o > oc) o = oc;
+      voff[t] += o - v;
+    }
+    vq[t] = q;
     cancel_ons(t, fol.to_host((int64_t)c.frame_of(vpos(q, v))) - 1, true, 2);
     planned[t] = v;
   }
@@ -2770,7 +2800,7 @@ CORE_COLD int play_step_of(int r, const Track* t) {
   if (transport != kPlay || !clk[r].on || play_abs[r] < 0) return -1;
   Ratio q = rat_of(t);
   int64_t v = q.num == q.den ? play_abs[r] : (int64_t)vnow(r, t);
-  return map_step(*cur, t, r, v).index;
+  return map_step(*cur, t, r, vstep(r, v)).index;
 }
 
 }  // namespace
@@ -2817,7 +2847,8 @@ CORE_COLD void reset() {
   rytm_dump::reset();
   sav_pending = false;
   fol.reset();
-  for (int r = 0; r < kRytmTracks; ++r) clk[r].reset(), restart[r] = true, planned[r] = 0, play_abs[r] = -1;
+  for (int r = 0; r < kRytmTracks; ++r)
+    clk[r].reset(), restart[r] = true, planned[r] = 0, play_abs[r] = -1, voff[r] = 0, vq[r] = Ratio{0, 1};
   set_transport(kStop);   // a take recording through a project load / hello ends (FC), as at the Rytm's STOP
   hframes = 0, transport_frame = INT64_MIN, bpm = 0, mask = 0, legacy_mask = 0, clock_now = 0, mask_sent = -1, hello_due = true, mutes = 0, solos = 0;
   out::set_mutes(0);
@@ -3105,7 +3136,7 @@ CORE_COLD void note(int vi, bool on, int pitch, int vel, int track) {
     int64_t sa = (int64_t)(x + 0.5 + 1e6) - 1000000;   // the nearest step (floor of x + 0.5)
     int micro = quant ? 0 : clampi((int)((x - (double)sa) * kSub + (x >= (double)sa ? 0.5 : -0.5)), -kSub / 2, kSub / 2);
     if (sa < 0) sa = 0;
-    int idx = map_step(*cur, t, r, sa).index;
+    int idx = map_step(*cur, t, r, vstep(r, sa)).index;   // (the step heard there: SPD's offset)
     Note n = new_note(*t, pitch, d2);
     n.micro = (int8_t)micro;
     n.fresh = sa >= planned[r] ? 1 : 0;   // its step is not planned yet: not again on top of the pad's own sound
@@ -4294,7 +4325,7 @@ double play_pos(int r) {
   int len = eff_len(t, r);
   double x = vnow(r, t);   // P2: in the track's own steps
   int64_t v = (int64_t)x;
-  StepAt at = map_step(*cur, t, r, v);   // E1: the mapped step plus how far into it the playhead is
+  StepAt at = map_step(*cur, t, r, vstep(r, v));   // E1: the mapped step plus how far into it the playhead is
   double m = (double)at.index + (x - (double)v);
   return m >= len ? m - len : m;
 }
@@ -4960,7 +4991,7 @@ CORE_COLD bool command(const char* p, char* out, int cap) {
     if (r < 0 || r >= kRytmTracks) return sniprintf(out, cap, CORE_STR("seq=print:T[:LOOP]")), true;
     const Track* t = track_of(*cur, r);
     int64_t loop = q ? atoi(q + 1) - 1 : 0;
-    if (!q && t && transport == kPlay && play_abs[r] >= 0) loop = map_step(*cur, t, r, (int64_t)vnow(r, t)).loop;
+    if (!q && t && transport == kPlay && play_abs[r] >= 0) loop = map_step(*cur, t, r, vstep(r, (int64_t)vnow(r, t))).loop;
     if (loop < 0) loop = 0;
     int n = print_rnd(r, loop);
     replan(r);
