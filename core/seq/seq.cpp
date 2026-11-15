@@ -3946,6 +3946,7 @@ CORE_COLD bool ui_enc(int e, int delta, bool func, bool shown) {
     return true;
   }
   if ((!seqmode && !shown) || e < 0 || e > 7 || !delta) return false;
+  if (!shown && !ui.held) return false;   // trk-rec: another page open in seq mode, no step held: the page's knob
   ui.touched = e;
   if (ui.prompt && shown) return true;   // seq-ux: nothing under a prompt
   // the lists, switches and small counts below (ui::list_turn, once a report; the long ones: the conditions); the rest values

@@ -2914,6 +2914,42 @@ int main() {
     CHECK(!seq::view().seqmode);
     engine_sysex(closed, sizeof closed);
   }
+  // ---- trk-rec (a user, 0.5.0): with REC on a seq track (seq mode) the knobs of another page open (INSERT here; every
+  // page but POLY and MORPH) were eaten by the SEQ page's handler (no step held: nothing done). They are the page's again;
+  // a held step's turn stays the SEQ values'
+  {
+    cmd("seq=track:1:on");
+    direct_state({8, 0, 0x7F});
+    seq::tick(now_ms() + 160);
+    CHECK(!seq::view().seqmode);
+    ins::reset();
+    for (int c = 0; c < ins::kVoices; ++c) ins::set_type(c, 0, ins::kFilter), ins::set_param(c, 0, 0, 80);
+    auto sum = [] {   // P1 over the voices (INSERT shows the selected track's voice: which one does not matter here)
+      int k = 0;
+      for (int c = 0; c < ins::kVoices; ++c) k += ins::param(c, 0, 0);
+      return k;
+    };
+    auto open_ins = msg(0x30, {2, 1, 0});
+    engine_sysex(open_ins.data(), (int)open_ins.size());   // the page open
+    remote_show_page("INSERT");
+    ins_page_set(false, 0, 0, 0);
+    int s0 = sum();
+    enc(0, -5);
+    CHECK(sum() == s0 - 5);   // REC off: A turns P1 (80 -> 75)
+    seqmode_enter(0);
+    CHECK(seq::view().seqmode);
+    remote_show_page("INSERT");
+    ins_page_set(false, 0, 0, 0);
+    s0 = sum();
+    enc(0, -5);
+    printf("  trk-rec: INSERT's A in seq mode, no step held: P1 moved by %d (want -5)\n", sum() - s0);
+    CHECK(sum() == s0 - 5);
+    direct_state({8, 0, 0x7F});
+    seq::tick(now_ms() + 160);
+    const uint8_t closed[] = {0xF0, 0x7D, 0x52, 0x54, 0x30, 1, 0, 0, 1, 0xF7};
+    engine_sysex(closed, sizeof closed);
+    ins::reset();
+  }
   printf("%s\n", cmd("seq").c_str());
   printf("test_seq: OK\n");
   return 0;
