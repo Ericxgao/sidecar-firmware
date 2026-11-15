@@ -511,6 +511,7 @@ struct View {
   int prompt_why;         // kPromptExplain: 0 an analog machine, 2 JUNO (mono), 3 another mono Sidecar machine
   int prompt_sel;         // kPromptMenu: the row (0 BACK, 1 TURN OFF, 2 LENGTH, 3 QUANTISE)
   bool off_hint;          // R2: B was turned down on a poly track (the footer says how to turn it off)
+  bool can_make;          // the shown track can be made a poly track (a Sidecar machine; not the Rytm's own synth)
   int lock_page;          // trigs held + a page key: kLp* (the held steps' locks), -1 none
   bool view_opened;       // the Rytm's TRK + TRIG opened the page (NO closes it; rui1036's FUNC + LFO)
   bool trigview;          // rui1040: the TRIG key's view (the step's / the track's trig values), else the notes

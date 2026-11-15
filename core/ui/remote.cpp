@@ -1912,7 +1912,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
                                                   // follows the selection; the pads' binding too
         // 0.5.0 (owner: "Follow, never close"; a plain pad press selects its track too, 49 1 2): the track pages (SEQ,
         // INSERT's track view, ARP, POLY) follow the selection, also to a track of the Rytm's own synth, which each
-        // page shows in its own way (SEQ its explain prompt, INSERT its footer, ARP and POLY their analog screens).
+        // page shows in its own way (SEQ its plain page, no prompt; INSERT its footer, ARP and POLY their analog screens).
         // No selection closes a page. (A pattern or kit load that moves the selection does the same.)
 #endif
         disp.info_gen = disp.info_gen + 1;
