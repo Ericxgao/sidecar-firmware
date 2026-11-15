@@ -949,7 +949,7 @@ the A72 model: PHASER about 1.9 k instructions and 1.5 k model cycles a 12-frame
 FX's budget for one call is 120 us: about 180 k cycles on a Pi 4 at 1.5 GHz).
 `core/tests/test_ufx_ambient.cpp` does the same for NIMBUS and GALACTIC (`make -C plugins/ufx_nimbus fixtures`, `make -C
 plugins/ufx_galactic fixtures`): the labels, the decay and tone knobs, the ensemble's pad, stereo, GALACTIC's freeze and a size change in a
-tail, and the loudest settings (not muted, the tail alive and under the host's clamp). The A72 model: NIMBUS about 52 k instructions and 41 k model cycles a block (the dearest
+tail, and the loudest settings (not muted, the tail alive and falling). The A72 model: NIMBUS about 52 k instructions and 41 k model cycles a block (the dearest
 effect: about a quarter of one call's budget on a Pi 4 by the model, which is a floor), GALACTIC 12 k and 12 k.
 
 ## 13. Presets

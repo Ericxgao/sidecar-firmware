@@ -8,8 +8,8 @@
 //     ends with a short decay;
 //   - GALACTIC: REPL sets the tail's length and holds it at 0, BRT closes the top, the sides differ, BIG turned down
 //     and up in a tail keeps playing;
-//   - the loudest settings of both: the slot is not muted and the tail is alive and under the host's clamp (the host
-//     turns a NaN into silence and clamps to +-1, so "finite" alone would prove nothing here);
+//   - the loudest settings of both: the slot is not muted and the tail is alive and falling (the host turns a NaN
+//     into silence and the send's limiter holds a runaway, so "finite and bounded" alone would prove nothing here);
 //   - the cost of one send slot's call on this Mac (printed; the Pi's estimate: core/tests/bench/ufx_bench.sh).
 #include <sys/stat.h>
 #include <unistd.h>
@@ -235,19 +235,23 @@ int main() {
     x.resize(48000 * 8, 0.0f);
     Run a(0, 0, 127, 80, 64);
     a.go(x, &L, &R);
-    float at = rms(L, 48000 * 2, 48000 * 2 + 9600), end = rms(L, 48000 * 7, 48000 * 8);
-    printf("test_ufx_ambient: NIMBUS pad: %.2e in the 0.2 s after the sine ends, %.2e 5 s after it (DCY 0)\n", at, end);
-    CHECK(sane(L, 2.0f) && sane(R, 2.0f) && at > 1e-3f && end < 1e-6f);
+    Run b(0, 0, 0, 80, 64);   // the same without the pad: the reverb's own tail there
+    b.go(x, &L2, &R2);
+    size_t p0 = 48000 * 2 + 14400, p1 = p0 + 9600;   // 0.3 .. 0.5 s after the sine ends
+    float at = rms(L, p0, p1), rev = rms(L2, p0, p1), end = rms(L, 48000 * 7, 48000 * 8);
+    printf("test_ufx_ambient: NIMBUS pad: 0.3 s after the sine ends %.2e with ENS 127, %.2e with ENS 0; %.2e 5 s after it (DCY 0)\n",
+           at, rev, end);
+    CHECK(sane(L, 2.0f) && sane(R, 2.0f) && at > 3.0f * rev && end < 1e-6f);
   }
   {   // the loudest settings: full-scale noise for 4 s, then 6 s of silence
     std::vector<float> x = burst(4.0f, 10.0f, 1.0f);
     Run a(0, 127, 127, 127, 127);
     a.go(x, &L, &R);
     CHECK(sane(L, 4.0f) && sane(R, 4.0f));
-    float tail = rms(L, L.size() - 48000, L.size()), pk = 0.0f;
-    for (float y : L) pk = std::fabs(y) > pk ? std::fabs(y) : pk;
-    printf("test_ufx_ambient: %s loudest: tail %.3f, peak %.3f\n", "NIMBUS", tail, pk);
-    CHECK(!um::slot_view(5).muted && tail > 1e-3f && pk < 0.99f);
+    // (the send's limiter holds a runaway near 0.5, so a peak proves nothing: the tail must be alive and falling)
+    float early = rms(L, 48000 * 9 / 2, 48000 * 11 / 2), tail = rms(L, L.size() - 48000, L.size());
+    printf("test_ufx_ambient: %s loudest: the tail %.3f just after the noise, %.3f 5 s later\n", "NIMBUS", early, tail);
+    CHECK(!um::slot_view(5).muted && tail > 1e-3f && tail < 0.95f * early);
   }
 
   // ---- GALACTIC
@@ -278,10 +282,10 @@ int main() {
     Run a(1, 1, 127, 127, 127);
     a.go(x, &L, &R);
     CHECK(sane(L, 4.0f) && sane(R, 4.0f));
-    float tail = rms(L, L.size() - 48000, L.size()), pk = 0.0f;
-    for (float y : L) pk = std::fabs(y) > pk ? std::fabs(y) : pk;
-    printf("test_ufx_ambient: %s loudest: tail %.3f, peak %.3f\n", "GALACTIC", tail, pk);
-    CHECK(!um::slot_view(6).muted && tail > 1e-3f && pk < 0.99f);
+    // (the send's limiter holds a runaway near 0.5, so a peak proves nothing: the tail must be alive and falling)
+    float early = rms(L, 48000 * 9 / 2, 48000 * 11 / 2), tail = rms(L, L.size() - 48000, L.size());
+    printf("test_ufx_ambient: %s loudest: the tail %.3f just after the noise, %.3f 5 s later\n", "GALACTIC", early, tail);
+    CHECK(!um::slot_view(6).muted && tail > 1e-3f && tail < 0.95f * early);
   }
   {   // REPL 0 holds what is in the tank: the level 1 s and 5 s after a burst is the same
     std::vector<float> x = burst(1.0f, 2.0f, 0.1f);
