@@ -219,6 +219,7 @@ const char* speed_name(int spd);     // "FOLLOW" "1/8" .. "7/8"
 bool speed_elektron(int spd);        // one of Elektron's set (the knob's main range; the others on FUNC: Q8)
 int speed_parse(const char* s);      // "follow" / "1/2" / "3/2" / "2" ... -> the id, -1 none
 int speed_step(int spd, int d, bool func);   // the knob: d steps through Elektron's set (func: every ratio, by size)
+int speed_pos(int spd);              // its place in the knob's order, 0 (1/8) .. kSpeeds - 1 (2): the knob's arc
 // seqtop P1: the play directions' names ("FWD" "REV" "PEND" "PING" "RND" "BROWN"; kDir* in core/seq/rng.h)
 const char* dir_name(int dir);
 int dir_parse(const char* s);        // "fwd" / "REV" ... -> the id, -1 none

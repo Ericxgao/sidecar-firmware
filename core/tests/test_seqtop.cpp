@@ -309,6 +309,19 @@ static void test_speed() {
   CHECK(seq::speed_step(seq::kSpdFollow, -1, false) == seq::kSpd3_4 && seq::speed_step(seq::kSpdFollow, -1, true) == seq::kSpd7_8);
   CHECK(seq::speed_step(seq::kSpdFollow, 1, false) == seq::kSpd3_2 && seq::speed_step(seq::kSpdFollow, 1, true) == seq::kSpd5_4);
   CHECK(seq::speed_step(seq::kSpd2, 5, false) == seq::kSpd2 && seq::speed_step(seq::kSpd1_8, -3, true) == seq::kSpd1_8);
+  // the knob's arc (page_seq: speed_pos): rises with every step of a turn, plain or FUNC, from the left end to the right
+  for (bool func : {false, true}) {
+    int s = seq::kSpd1_8, p = seq::speed_pos(s);
+    CHECK(p == 0);
+    for (int n = 0; n < seq::kSpeeds; ++n) {
+      int s2 = seq::speed_step(s, 1, func);
+      if (s2 == s) break;
+      CHECK(seq::speed_pos(s2) > p);
+      s = s2, p = seq::speed_pos(s);
+    }
+    CHECK(s == seq::kSpd2 && p == seq::kSpeeds - 1);
+  }
+  CHECK(seq::speed_pos(seq::kSpdFollow) > seq::speed_pos(seq::kSpd3_4));   // (by id FOLLOW, 0, was drawn left of 3/4)
   fresh_track();
   auto base = play_steps(32);
   CHECK(base.size() == 32);
