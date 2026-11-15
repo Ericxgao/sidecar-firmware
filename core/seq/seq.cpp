@@ -1392,9 +1392,11 @@ CORE_COLD void plan_step(const Pattern& p, Track& t, int r, int64_t a, double fs
   int vi = voice_of(r);
   if (vi < 0) return;
   double fs0 = fs;   // the step's place on the grid (X1: a slide's target is counted from it)
-  // swing: every second step late; P1 (Q3): under another direction the tick's, so the groove stays
+  // swing: every second step late; P1 (Q3): under another direction the tick's, so the groove stays (the grid's count:
+  // a, less SPD's offset)
   bool ord = has_order(t, p);   // (H1's jumps: the tick's too)
-  if (t.swing > 50 && ((t.dir || ord ? (int)(a & 1) : idx) & 1)) fs += (t.swing / 50.0 - 1.0) * per;
+  const int64_t ga = pred ? a : a - voff[r];
+  if (t.swing > 50 && ((t.dir || ord ? (int)(ga & 1) : idx) & 1)) fs += (t.swing / 50.0 - 1.0) * per;
   // H1's plan-time commands of the step (each column unless the other's CHN fails)
   int dly = 0, cut = -1, oct = 0, trs = 0, rnr = 0, rnv = 0, rtg = 0;
   for (int col = 0; col < 2; ++col) {
@@ -1722,12 +1724,11 @@ CORE_COLD void replan(int r) {
     bool moved = qo.num && (qo.num != q.num || qo.den != q.den);
     if (!c.on || c.period <= 0 || !fol.valid) {
       cancel_ons(t, (int64_t)hframes);
-      if (c.on || moved) {   // (paused: the clock is off, the count kept; continue re-anchors from it)
+      if (c.on) {   // (paused, the clock off: a change waits for continue, plan()'s replan then works from its anchor)
         int64_t v = vfloor_i(q, c.abs) + 1;
-        if (moved) voff[t] += vfloor_i(qo, c.abs) + 1 - v;
+        if (moved) voff[t] += vfloor_i(qo, c.abs) + 1 - v, vq[t] = q;
         planned[t] = v;
       }
-      if (moved) vq[t] = q;
       continue;
     }
     int64_t v = vceil_d(q, c.step_at((double)fol.to_rytm((int64_t)hframes + latency)));   // its micro-0 note not started

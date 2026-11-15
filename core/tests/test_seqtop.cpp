@@ -513,6 +513,94 @@ static void test_speed_mid() {
   printf("  SPD mid-play: %d ratio pairs continue, a turn up %zu notes in order\n", pairs, w.size());
   cmd("seq=spd:1:follow");
 }
+// PAUSE, SPD changed, CONTINUE: the change waits for continue, which goes on from the step after the last one heard
+// (or, as a continue without a change does, a step later: the step planned before PAUSE was dropped), on the new grid,
+// never a step heard again. The notes after continue (positions on the clock shifted by the pause), g_pause_last the
+// last one before
+static int g_pause_last = -1;
+static std::vector<Hit> pause_spd(const char* from, const char* to, double pause_at, int resume_k) {
+  fresh_track();
+  char f[40];
+  snprintf(f, sizeof f, "seq=spd:1:%s", from), cmd(f);
+  g_wire.clear(), g_hits.clear();
+  g_t0 = ((int64_t)seq::frames() / 32 + 200) * 32;
+  auto b = std::vector<uint8_t>{1, 1};
+  auto x = blk4(g_t0);
+  b.insert(b.end(), x.begin(), x.end());
+  g_wire.push_back({g_t0 + 700, msg(0x2D, b)});
+  int64_t k = 0;
+  run_until(k, g_t0 + (int64_t)(pause_at * g_period));
+  auto ps = blk4((int64_t)seq::frames());
+  std::vector<uint8_t> p = {1, seq::kPause};
+  p.insert(p.end(), ps.begin(), ps.end());
+  direct_state(p);
+  g_wire.clear();
+  for (int i = 0; i < 100; ++i) block();
+  snprintf(f, sizeof f, "seq=spd:1:%s", to), cmd(f);
+  for (int i = 0; i < 100; ++i) block();
+  size_t before = g_hits.size();
+  g_pause_last = -1;
+  double lp = -1;
+  for (const Hit& y : g_hits)
+    if (y.pos > lp) lp = y.pos, g_pause_last = y.pitch - 48;
+  int64_t h = (int64_t)seq::frames();
+  g_t0 += (h + 2000) - (g_t0 + (int64_t)llround(resume_k * g_period));   // tick resume_k shortly after continue
+  auto cs = blk4(h);
+  std::vector<uint8_t> c = {1, seq::kPlay};
+  c.insert(c.end(), cs.begin(), cs.end());
+  direct_state(c);
+  k = resume_k;
+  run_until(k, g_t0 + (int64_t)((resume_k + 8) * g_period));
+  auto ss = blk4((int64_t)seq::frames() - 700);
+  std::vector<uint8_t> st = {1, seq::kStop};
+  st.insert(st.end(), ss.begin(), ss.end());
+  direct_state(st);
+  for (int i = 0; i < 200; ++i) block();
+  std::vector<Hit> res(g_hits.begin() + (long)before, g_hits.end());
+  std::sort(res.begin(), res.end(), [](const Hit& a, const Hit& b) { return a.pos < b.pos; });
+  if (getenv("SQT_DEBUG")) {
+    printf("    pause %s -> %s at %.2f:", from, to, pause_at);
+    for (auto& y : res) printf(" s%d@%.2f", y.pitch - 48 + 1, y.pos);
+    printf("\n");
+  }
+  cmd("seq=spd:1:follow");
+  return res;
+}
+static void test_speed_pause() {
+  struct Case {
+    const char *from, *to;
+    double at;
+  } cases[] = {{"1/2", "2", 10.3}, {"2", "1/2", 10.7}, {"2", "follow", 10.7}, {"follow", "2", 10.3}, {"3/4", "1/4", 10.3}};
+  for (const Case& c : cases) {
+    auto same_spd = pause_spd(c.from, c.from, c.at, 11);
+    auto changed = pause_spd(c.from, c.to, c.at, 11);
+    seq::Ratio q = seq::speed_ratio(seq::speed_parse(c.to));
+    CHECK(!same_spd.empty() && changed.size() >= 2 && g_pause_last >= 0);
+    int first = changed[0].pitch - 48;
+    CHECK(first == (g_pause_last + 1) % 16 || first == same_spd[0].pitch - 48);
+    CHECK(continues(changed));
+    for (size_t i = 1; i < changed.size(); ++i)   // the new ratio's steps (one apart: den / num Rytm steps)
+      CHECK(std::fabs(changed[i].pos - changed[i - 1].pos - (double)q.den / q.num) < 0.02);
+  }
+  printf("  SPD changed while paused: continue goes on from its step, on the new grid\n");
+}
+// swing under another direction stays the grid's (the Rytm's groove) after a change with an odd offset (3/4 -> FOLLOW at
+// 20.3: s16 at 20, s1 next at 21: count 21 plays the step of count 16)
+static void test_speed_swing() {
+  fresh_track();
+  cmd("seq=dir:1:rev"), cmd("seq=swing:1:66"), cmd("seq=spd:1:3/4");
+  g_sw_n = 1, g_sw_i = 0, g_sw_at = 20.3, g_sw_to[0] = "seq=spd:1:follow";
+  auto h = play_steps(30, switch_spd);
+  int n = 0;
+  for (const Hit& x : h) {
+    if (x.pos < 20.9) continue;
+    int k = (int)std::floor(x.pos + 0.05);
+    CHECK(at_pos(x.pos, k + (k & 1 ? 0.32 : 0.0)));   // the odd counts late, as before the change
+    ++n;
+  }
+  CHECK(n >= 8);
+  cmd("seq=dir:1:fwd"), cmd("seq=swing:1:50"), cmd("seq=spd:1:follow");
+}
 // the recorder writes a pad to the step heard there, after an SPD change too
 static int g_rec_pitch = -1;
 static double g_rec_head = -1;   // the drawn playhead there (seq::play_pos)
@@ -1521,6 +1609,8 @@ int main() {
   test_speed_switch();
   test_speed_mid();
   test_speed_rec();
+  test_speed_pause();
+  test_speed_swing();
   test_speed_mid_switch();
   test_dir_planner();
   test_scale_planner();
