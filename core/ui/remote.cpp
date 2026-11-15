@@ -373,6 +373,7 @@ struct State {
   bool clock_set = false;
   bool map_over = false;     // rui1050: UP's map shown over the open page (49 1 5 1), map_back the page under it
   int map_back = -1;
+  bool up_down = false;      // 0.5.0 FILL: UP held on the open page (its 31s, whichever page takes them): up_right_fill
   // 0.5.0 (spec-050 2.6): the keys an engine page with key_up took at their press (bit c: code c), and that page
   uint32_t held_keys[8] = {};
   const ExtraPage* held_page = nullptr;
@@ -745,6 +746,24 @@ CORE_COLD void release_held() {
 }
 
 CORE_COLD bool key_held(int code) { return code >= 0 && code < 256 && (s.held_keys[code >> 5] >> (code & 31) & 1); }
+
+// 0.5.0 FILL (owner, 2026-11-15 on hardware: "UP + RIGHT (FILL mode) doesn't do anything"): rytm-mods 0026 sends UP +
+// RIGHT as 49 1 1 16 only while its page is closed. A hand holds UP a moment before the arrow: after 0.4 s the Rytm asks
+// for the combo map (49 1 4 1), the host opens the page on KEYS, and RIGHT then reaches that open page as a 31, where it
+// did nothing, and UP's release closed the map: nothing at all. With a page open UP and RIGHT are always its 31s. So
+// RIGHT with UP held is FILL here too: UP held on the open page (its 31), or UP's map up (from the stock screen, 49 1 4;
+// over a page, 49 1 5). FILL itself keeps its own UP + RIGHT (it closes: the combo toggles).
+CORE_COLD bool up_right_fill() {
+#if CORE_POLY
+  if (!s.up_down && !keys_map_on() && !s.map_over) return false;
+  const ExtraPage* x = extra_of(s.voice);
+  if (x && !strcmp(x->title, "FILL")) return false;
+  fill_page_open(-1);   // (UP's release then leaves FILL up: the map's end closes or restores only KEYS)
+  return true;
+#else
+  return false;
+#endif
+}
 
 
 CORE_COLD void on_key(int code, bool down) {
@@ -1623,6 +1642,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         s.shortcut = false, s.via = -1, s.sedit_back = kNoPage;
         keys_map_drop(), s.map_over = false;   // (UP's map goes with the page)
         release_held();                        // 0.5.0: and every key a page holds
+        s.up_down = false;
 #if CORE_POLY
         seq::page_closed();   // seq-ux: a prompt, TRK + TRIG's view end with the page
         poly_page_closed();   // rui1048
@@ -1654,6 +1674,11 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 #if CORE_POLY
       if ((b[0] << 7 | b[1]) == 0x86) core::poly::rytm_trk(b[2] != 0);   // 1042: TRK + pad is a selection (core/poly.h)
 #endif
+      if (s.open && (b[0] << 7 | b[1]) == kKeyUp) s.up_down = b[2] != 0;
+      if (s.open && b[2] && (b[0] << 7 | b[1]) == kKeyRight && up_right_fill()) {   // 0.5.0: UP + RIGHT, the page open
+        s.input = true;
+        return;
+      }
       if (!s.open && src_bank_key(b[0] << 7 | b[1], b[2])) {   // rui1038: the bank list's LEFT RIGHT UP DOWN (0.5.0: 2 = with FUNC)
         s.input = true;
         return;
@@ -1961,6 +1986,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         // What the hello invalidates on the Rytm's side is sent again, as after an open.
         s.sent_valid = false, s.mask_valid = false, s.echo_valid = false, s.leds_on = false, s.clock_set = false;
         release_held();   // 0.5.0: a key held across the new link sends no release
+        s.up_down = false;
         s.caps36 = (b[2] & 1) != 0, s.caps = b[2], s.caps2 = n >= 4 ? b[3] : 0;
         mod::rytm_host_cmd((b[2] & mod::kCapsHostCmd) != 0);   // 0.5.0: the mod command (core/mod/rytm_out.h)
         fill_claim();
@@ -1984,6 +2010,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 #endif
       keys_map_drop(), s.map_over = false;   // (a release lost with the link: no map left up)
       release_held();                        // 0.5.0: and every key a page holds
+      s.up_down = false;
       // A status popup goes with the old link. The pairing code's modal does not: it is owed until it has been on
       // this Rytm's screen, and a hello arriving while it was owed or up (the Rytm restarting, or saying hello again
       // after a silence) dropped it, so the code was never seen (audit 2026-10-26). It starts again, on this link.
