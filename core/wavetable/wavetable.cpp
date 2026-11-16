@@ -207,7 +207,11 @@ CORE_COLD void set_knobs(int vi) {
 CORE_COLD void select(int vi) {
   int e = srclib::code_of(vp[vi][0]);   // the pool row: bank * 128 + row
   if (!list || e < 0 || e >= nlist) return;
-  if (v[vi].wt || force[vi]) pools::voice_on(pools::kTables, vi, e);
+  if (!(v[vi].wt || force[vi])) return;   // not on WAVETABLE (left it: leave()): no selection, no card slot (a compose)
+  pools::voice_on(pools::kTables, vi, e);
+  // a table that failed to load, picked again (TBL away and back): tried again (the card was busy, the file is
+  // fixed); the same TBL at every report or trig does not reload it
+  if (e != want[vi] && failed[e]) failed[e] = 0, why[e] = 0;
   want[vi] = (int16_t)e;
   if (srclib::silent(list, e)) return;   // OFF / empty / missing: no sound (a trig skips it)
   int t = resident(e);
@@ -593,6 +597,13 @@ CORE_COLD void silence(int vi) {
   }
 }
 
+CORE_COLD void leave(int vi) {   // the voice left WAVETABLE: its notes end, its selection drops (its card table may go)
+  vi &= 7;
+  silence(vi);
+  want[vi] = -1;
+  __atomic_store_n(&sel[vi], (uint32_t)kTables, __ATOMIC_SEQ_CST);
+}
+
 CORE_COLD const char* entry_name(int e) {
   if (!list || nlist <= 0) return "";
   return list[e < 0 ? 0 : e >= nlist ? nlist - 1 : e].name;
@@ -639,6 +650,13 @@ CORE_COLD bool pick(int vi, int e) {   // the touchscreen's choice: TBL written 
   select(vi);
   log(CORE_STR("wt: voice %d: TBL %c%03d %s"), vi, 'A' + srclib::bank_of(e), e & 127, entry_name(e));
   return true;
+}
+CORE_COLD void kit_src(int vi, int e) {
+  vi &= 7;
+  if (!job || !list || e < 0 || e >= nlist) return;
+  vp[vi][0] = (float)(e & 127) + (float)srclib::lo_of(e) / 128.0f;
+  select(vi);
+  pools::seen(pools::kTables, e);   // (the used set, as a report)
 }
 CORE_COLD void preview(int vi, int e) {
   vi &= 7;

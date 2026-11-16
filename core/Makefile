@@ -14,10 +14,10 @@ B        := build
 ENG      := $(B)/engines
 include engines/engines.mk
 RMPSRC   := ../teensy/libraries/RytmPlugins/src
-CXXFLAGS := -std=c++17 -O2 -DCORE_UI_TOOLS=1 -DCORE_POLY=1 -DCORE_MSAMP=1 -g -Wall -Wextra -Wno-unused-parameter -ffp-contract=fast -fPIC -I. -Ihost -I$(RMPSRC) -I../sdk $(ENG_INC) $(ENG_FLAGS)
+CXXFLAGS := -std=c++17 -O2 -DCORE_UI_TOOLS=1 -DCORE_POLY=1 -DCORE_MSAMP=1 -DSIDECAR_MORPH=1 -g -Wall -Wextra -Wno-unused-parameter -ffp-contract=fast -fPIC -I. -Ihost -I$(RMPSRC) -I../sdk $(ENG_INC) $(ENG_FLAGS)
 CFLAGS   := -std=c99 -O2 -g -ffp-contract=fast -fPIC -w $(ENG_INC)
 # The core's own sources (grows task by task) and the Mac port.
-CORE_SRC := engine.cpp project_key.cpp md/md.cpp $(wildcard device/*.cpp) $(wildcard bundle/*.cpp) lfo.cpp hooks.cpp notes.cpp voices.cpp poly.cpp inst.cpp inst_alloc.cpp keys.cpp sysex.cpp host_link.cpp slots.cpp fx/send_fx.cpp fx/send_fx_card.cpp fx/insert.cpp fx/insert_card.cpp fx/master.cpp fx/amp.cpp fx/out.cpp fx/out_measure.cpp ui/canvas.cpp ui/widgets.cpp ui/pages.cpp ui/remote.cpp $(wildcard ui/page_*.cpp) $(wildcard seq/*.cpp) $(wildcard song/*.cpp) $(wildcard rec/*.cpp) pool/card_index.cpp pool/pool.cpp pool/pcache.cpp pool/sample_ram_pool.cpp pool/stream_budget.cpp presets/libs.cpp presets/preset_index.cpp msamp/sfz.cpp msamp/elmulti.cpp msamp/msamp.cpp msamp/sdtest.cpp msamp/cardq.cpp $(wildcard samp/*.cpp) $(wildcard wavetable/*.cpp) $(wildcard granular/*.cpp) livein/livein.cpp midim/midim.cpp arp/arp.cpp $(wildcard chop/*.cpp) $(wildcard lib/*.cpp) $(wildcard fmt/*.cpp) $(wildcard store/*.cpp) host/platform_host.cpp host/newlib_rand.cpp \
+CORE_SRC := engine.cpp project_key.cpp md/md.cpp $(wildcard device/*.cpp) $(wildcard bundle/*.cpp) lfo.cpp hooks.cpp notes.cpp voices.cpp poly.cpp inst.cpp inst_alloc.cpp keys.cpp sysex.cpp host_link.cpp slots.cpp fx/send_fx.cpp fx/send_fx_card.cpp fx/insert.cpp fx/insert_card.cpp fx/master.cpp fx/amp.cpp fx/out.cpp fx/out_measure.cpp ui/canvas.cpp ui/widgets.cpp ui/pages.cpp ui/remote.cpp $(wildcard ui/page_*.cpp) $(wildcard seq/*.cpp) $(wildcard song/*.cpp) $(wildcard rec/*.cpp) pool/card_index.cpp pool/pool.cpp pool/pcache.cpp pool/sample_ram_pool.cpp pool/stream_budget.cpp presets/libs.cpp presets/preset_index.cpp msamp/sfz.cpp msamp/elmulti.cpp msamp/msamp.cpp msamp/sdtest.cpp msamp/cardq.cpp $(wildcard samp/*.cpp) $(wildcard wavetable/*.cpp) $(wildcard granular/*.cpp) livein/livein.cpp midim/midim.cpp arp/arp.cpp $(wildcard chop/*.cpp) $(wildcard lib/*.cpp) $(wildcard fmt/*.cpp) $(wildcard store/*.cpp) $(wildcard mod/*.cpp) host/platform_host.cpp host/newlib_rand.cpp \
             user/um.cpp user/lists.cpp host/um_host.cpp $(addprefix $(RMPSRC)/,rmp_loader.cpp rmp_manifest.cpp rmp_meta.cpp rmp_proto.cpp rmp_resolve.cpp rmp_slots.cpp rmp_presets.cpp rmp_pool.cpp)
 TESTS    := $(patsubst tests/%.cpp,$(B)/%,$(wildcard tests/test_*.cpp))
 ENG_OBJ  := $(patsubst $(ENG)/%,$(B)/eng-obj/%.o,$(ENG_SRC) $(ENG_C_SRC))
@@ -146,22 +146,49 @@ $(SMALL)/test_%: tests/small/test_%.cpp $(SMALL_CORE_OBJ) $(DEPS_H) $(B)/libengi
 	@mkdir -p $(SMALL)
 	$(CXX) $(CXXFLAGS) $(SMALL_FLAGS) -Itests -o $@ $< $(SMALL_CORE_OBJ) $(B)/libengines.a
 
+# The 0.5.0 shipping configuration of the scene morph (SIDECAR_MORPH 0, core/sidecar_features.h): the tests above run with
+# the morph ON (their engine is still built and kept for 0.5.1); tests/nomorph runs the core with it off
+NOMORPH       := $(B)/nomorph
+NOMORPH_FLAGS := -USIDECAR_MORPH -DSIDECAR_MORPH=0
+NOMORPH_TESTS := $(patsubst tests/nomorph/%.cpp,$(NOMORPH)/%,$(wildcard tests/nomorph/test_*.cpp))
+NOMORPH_CORE_OBJ := $(addprefix $(NOMORPH)/obj/,$(CORE_O))
+$(NOMORPH)/obj/_up/%.o: ../%.cpp $(DEPS_H) | $(B)/libengines.a
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(NOMORPH_FLAGS) -Itests -c -o $@ $<
+$(NOMORPH)/obj/%.o: %.cpp $(DEPS_H) | $(B)/libengines.a
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(NOMORPH_FLAGS) -Itests -c -o $@ $<
+$(NOMORPH)/test_%: tests/nomorph/test_%.cpp $(NOMORPH_CORE_OBJ) $(DEPS_H) $(B)/libengines.a
+	@mkdir -p $(NOMORPH)
+	$(CXX) $(CXXFLAGS) $(NOMORPH_FLAGS) -Itests -o $@ $< $(NOMORPH_CORE_OBJ) $(B)/libengines.a
+
 # Every test run is its own target, so `make -j10 test` runs them side by side (2026-10-26: the one-after-another loop
 # took ~45 min with the builds; every test works in its own mkdtemp folder). A run's output goes to <test>.log and is
 # shown when the test fails; test-serial keeps the old ordered run with all output.
-ALL_TESTS := $(TESTS) $(MC_TESTS) $(SMALL_TESTS)
+ALL_TESTS := $(TESTS) $(MC_TESTS) $(SMALL_TESTS) $(NOMORPH_TESTS)
 # The tests that check a wall-clock bound (a control pass under the FIFO, a call under 50 us): run one at a time after
 # the parallel batch, when nothing else loads the CPU (under -j10 test_library_stall measured a 2142 us pass, 1835 alone)
 TIMING_TESTS := $(addprefix $(B)/,test_bundle_stall test_library_stall test_loadstall test_insert test_sat test_library test_tape \
                   test_send_fx test_srclib test_seqtop test_noteedit test_stereo test_msamp_load)
 # The Teensy's configuration (no CORE_POLY, no CORE_MSAMP: no built-in MD), compiled for syntax only on the files the
 # MD change touched that build there today (voices.cpp, ui/remote.cpp, lfo.cpp and a few more already fail in that
-# configuration on integ-1028, unrelated: not listed)
-TEENSY_CFG_SRC := md/md.cpp inst.cpp inst_alloc.cpp host_link.cpp notes.cpp ui/page_lfo.cpp livein/livein.cpp
+# configuration on integ-1028, unrelated: not listed); core/mod (spec-050 1.7: kV and kFx only there)
+TEENSY_CFG_SRC := md/md.cpp inst.cpp inst_alloc.cpp host_link.cpp notes.cpp ui/page_lfo.cpp livein/livein.cpp mod/kinds.cpp mod/mod.cpp
 teensy-cfg:
 	@for f in $(TEENSY_CFG_SRC); do $(CXX) -std=c++17 -fsyntax-only -Wall -Wno-unused-parameter -I. -Ihost -I$(RMPSRC) -I../sdk $(ENG_INC) $(ENG_FLAGS) $$f || exit 1; done
 	@echo "teensy configuration: $(TEENSY_CFG_SRC) compile"
 .PHONY: teensy-cfg
+# the sources and flags of a test build, for tools/golden_a64.sh (the LFO golden built with the Pi's compiler flags)
+print-src:
+	@echo "CORE_SRC=$(CORE_SRC)"
+	@echo "ENG_SRC=$(ENG_SRC)"
+	@echo "ENG_C_SRC=$(ENG_C_SRC)"
+	@echo "ENG_INC=$(ENG_INC)"
+	@echo "ENG_FLAGS=$(ENG_FLAGS)"
+	@echo "RMPSRC=$(RMPSRC)"
+	@echo "HOT_O3=$(HOT_O3)"
+	@echo "HOT_O3_ENG=$(HOT_O3_ENG)"
+.PHONY: print-src
 test: teensy-cfg $(patsubst %,%.run,$(filter-out $(TIMING_TESTS),$(ALL_TESTS))) $(TIMING_TESTS)
 	@set -e; for t in $(TIMING_TESTS); do ./$$t > $$t.log 2>&1 || { cat $$t.log; echo "FAILED: $$t"; exit 1; }; done
 	@echo "ALL CORE TESTS PASS"

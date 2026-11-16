@@ -43,7 +43,7 @@ uint32_t Output::Push(const int16_t (*frames)[kVoices], uint32_t n, const int16_
   return k;
 }
 
-// x before any limit. No gain or down: the -12 dBFS limit, then the gain, the Rytm's path bit for bit. Up (a box whose insert point sits low): the gain first and one knee
+// x before any limit. No gain or down: the -12 dBFS limit (its soft knee, core/main_out.h), then the gain. Up (a box whose insert point sits low): the gain first and one knee
 // toward full scale, so a hot voice is not cut at the limit and clipped again.
 float Output::Own(float x, float t) {
   if (t > 1.0f) return core::out::Mixer::Limit(x * t, 0.9999f);
@@ -63,6 +63,8 @@ void Output::Pull(int32_t (*out)[kChannels], uint32_t n, int16_t (*voices)[kVoic
   const Mode mode = GetMode();
   const bool test = core::out::meas::active();   // stereo=measure: its test signals (core/fx/out_measure.h)
   const float trk_gain = c.trk10 ? powf(10.0f, (float)c.trk10 / 200.0f) : 1.0f;   // stereo=trim:trk (once a block: a change is a step, a test setting)
+  int32_t tp[kVoices] = {};   // each voice's largest |sample| on its own track this call (the web's meters, TakeTrkPeaks)
+  float tg = 0.0f;
   for (uint32_t i = 0; i < n; ++i) {
     for (int ch = 0; ch < kChannels; ++ch) out[i][ch] = 0;
     if (taps && taps->feed) memset(taps->feed[i], 0, sizeof taps->feed[i]);
@@ -87,8 +89,13 @@ void Output::Pull(int32_t (*out)[kChannels], uint32_t n, int16_t (*voices)[kVoic
     }
     if (taps && taps->lr) memcpy(taps->lr[i], f.v, sizeof f.v), memcpy(taps->lr[i] + kVoices, f.r, sizeof f.r);
     float g = main_.Gain();
+    tg = g;
     if (!test && mix_->AllTrk(c)) {   // every voice on TRK: the old path, bit for bit
       if (voices) memcpy(voices[i], f.v, sizeof f.v);
+      for (int v = 0; v < kVoices; ++v) {   // (an integer abs and max a voice: the meter, nothing in the output)
+        const int32_t a = f.v[v] < 0 ? -(int32_t)f.v[v] : f.v[v];
+        if (a > tp[v]) tp[v] = a;
+      }
       if (mode == kMain) {
         out[i][0] = out[i][1] = To32(main_.Sum(f.v, g));
       } else {
@@ -118,6 +125,8 @@ void Output::Pull(int32_t (*out)[kChannels], uint32_t n, int16_t (*voices)[kVoic
     int16_t m[kVoices];   // the TRK shares (int16 scale: |trk| <= 32767)
     for (int v = 0; v < kVoices; ++v) {
       m[v] = (int16_t)trk[v];
+      const int32_t a = m[v] < 0 ? -(int32_t)m[v] : m[v];   // the meter: a voice's share on its own track
+      if (a > tp[v]) tp[v] = a;
       if (voices) voices[i][v] = (int16_t)(((int32_t)f.v[v] + (int32_t)f.r[v]) / 2);
     }
     if (mode == kMain) {
@@ -146,6 +155,18 @@ void Output::Pull(int32_t (*out)[kChannels], uint32_t n, int16_t (*voices)[kVoic
     if (taps && taps->pairs) taps->pairs[i][0] = pre[0], taps->pairs[i][1] = pre[1], taps->pairs[i][2] = post[0], taps->pairs[i][3] = post[1];
   }
   d_.since_reset += n;
+  for (int v = 0; v < kVoices; ++v)
+    if (tp[v] > tpk_[v]) tpk_[v] = tp[v];
+  if (tg > 0.0f) tgain_ = tg;
+}
+
+void Output::TakeTrkPeaks(float* pk) {
+  const float g = tgain_ / 32768.0f;
+  for (int v = 0; v < kVoices; ++v) {
+    float a = (float)tpk_[v] * g;
+    pk[v] = a > 1.0f ? 1.0f : a;
+    tpk_[v] = 0;
+  }
 }
 
 void Output::TakeVoicePeaks(float (*pk)[2]) {

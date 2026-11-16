@@ -29,6 +29,7 @@ struct V {
   float note, level;
   bool daisy;          // DAISYSP or DSP SAMPLE (else PLAITS)
   bool dsps;           // DSP SAMPLE: P5/P6 are MIX/FB; its sample streams from the card (the GRAIN machine too)
+  bool smpl;           // SAMPLER (machines.h kSmplTag on a 0x20 report): dsps with the Digitakt-style PLAY / LOOP, no resonator
   bool grain;          // the GRAIN machine (machines.h kGrainMachine): dsps in GRAIN mode, P12 SPRY, no resonator
   bool md;             // MD (machines.h kMd, 0x40; core/md/md.h): the built-in mdkit drums (silent without CORE_MD)
   bool juno;           // JUNO
@@ -88,10 +89,38 @@ extern bool juno_holding[kVoices];
 int plaits_model(const V& x);
 int daisy_model(const V& x);
 int dsp_mode(const V& x);
+// SAMPLER's PLAY (x.smpl; docs/SAMPLER.md): 9 equal zones FWD REV FLP RLP SLICE GRAIN STRCH PLUCK WAVE, LOOP (P15) the
+// loop's start (0 OFF: STA..END whole). DSP SAMPLE's MOD (smpl false): its 7 zones ONE LOOP SLICE GRAIN STRCH PLUCK WAVE
+// and LOP's meanings, as before 0.5.0. The words are the same in both (word 20 PLAY / MOD, 23 LOOP / LOP).
+constexpr int kDspsPlays = 9;   // SAMPLER's PLAY zones (equal: zone = value * 9 / 128)
+enum DspsPlay { kPlayFwd, kPlayRev, kPlayFlp, kPlayRlp, kPlaySlice, kPlayGrain, kPlayStrch, kPlayPluck, kPlayWave };
+int dsps_play_zone(bool smpl, float play);           // SAMPLER's zone (DspsPlay) of a PLAY value; -1 for DSP SAMPLE
+int dsps_mode_of(bool smpl, float play);             // the engine's mode (rytm::SampleModes::Mode) a PLAY / MOD value plays
+const char* dsps_play_name(bool smpl, float play);   // "FWD" .. "WAVE" (DSP SAMPLE: "ONE" .. "WAVE")
 void apply(V& x);
 void ram_release(int vi);
 void prepare_stream(int vi);
 void trigger_stream(int vi, int note);
+#if CORE_MSAMP
+// The sample editor's play buffer (core/samp/sedit.h) in place of the sample RAM's copy: voice vi, triggering pool
+// slot `slot` (pool_slot), plays pcm (frames + a guard frame, ch interleaved, at rate) from its next trig on; fa < 0:
+// the track's STA..END, else the frames [fa, fb). Null clears it. A note already sounding keeps its own buffer.
+struct DspOverride {
+  const int16_t* pcm;
+  uint32_t frames;
+  float rate;
+  uint8_t ch;
+  int slot;
+  int32_t fa, fb;
+};
+void dsps_override(int vi, const DspOverride* o);
+// A voice playing from RAM reads [lo, hi) now (its engine's pcm in it); the control core's, between blocks
+bool dsps_reads(const int16_t* lo, const int16_t* hi);
+// The voices not playing that still hold a pcm in [lo, hi) let it go (their next trig sets their sample again)
+void dsps_detach_idle(const int16_t* lo, const int16_t* hi);
+// Voice vi plays its override's frames [a, b) once (ONE, no loop), as a trig at note 60; nothing without an override
+void dsps_preview(int vi, uint32_t a, uint32_t b);
+#endif
 bool prepare_pending();
 void fm_select(int vi, int pat);
 void fm_note_on(int vi, int note, int vel);   // 6-OP FM's mono note (voice_report; core/poly.cpp)
@@ -112,6 +141,8 @@ extern uint32_t ram_late;             // trigs of a RAM-only mode whose sample c
 void voices_init();
 // A 0x04 / 0x03 report (d: the whole F0..F7, len bytes) and a 0x11 note-off.
 void voice_report(int cmd, const uint8_t* d, int len);
+// polyuser-4 F-b1: a 33 names voice vi's Sidecar machine (vb): the voice takes it while no 0x03 / 0x04 has come yet
+void voice_machine_hint(int vi, uint8_t vb);
 void voice_note_off(int vi);
 void voice_params_changed(int vi);   // x.p changed on the control side (core/lfo.h): the machine takes it
 void voice_silence(int vi);   // MIDI CC 120: note-off and the output ramped out in 5 ms, silent until the next trig
@@ -132,6 +163,20 @@ void voice_play(int vi, int note, int vel);
 // stereo pair (L != R somewhere), for the output stage's PAN law (one byte a voice: cores render disjoint voices).
 // Null: mono only, as before (the Teensy, the tests).
 enum { kMFm, kMJuno, kMDsps, kMDaisy, kMMd, kMPlaits, kMUser, kMachines };
+// Every voice's level on its way out: render_voices scales each voice's rows (L and R) by kVoiceGain after the voice's
+// INSERT chain, so every path a voice takes gets it alike (TRK, out=main, OUT PRE / POST and the send FX, the recorder's
+// taps, the Teensy's return). Why (owner's decision 2026-11-15): the engines write o x 0.7 (-3 dBFS) and peaked at
+// -3..-8 dBFS at their default knobs (LEV 100, the rest 64, vel 127), but the output stage limits every voice at
+// -12 dBFS (core/main_out.h), so most engines were clipped by up to 10 dB. Measured at the defaults (the voice row
+// before this gain): DAISYSP STRING -4.4 dBFS (the loudest; -2.7 at DMP 0), PLAITS MODAL -5.2, MD -5.4, a 0 dBFS
+// sample on DSP SAMPLE / SAMPLER at LEV 100 -5.5, PLAITS CHORDS -7.7, DAISYSP MODAL -6.7, JUNO -8.0, 6-OP FM -11.0,
+// WAVETABLE -18.8. 0.35 (-9.1 dB; the owner's choice 2026-11-15, over the 0.25 that would have kept every default
+// under the knee) puts the loudest at -13.5 dBFS: inside the limit's soft knee (linear to -15.1 dBFS, the ceiling
+// -12.0 dBFS: core/main_out.h), under the ceiling, where the knee takes off at most 0.6 dB; PLAITS MODAL (-14.3) is in
+// the knee too. The other engines stay under it and keep their levels against each other. Hotter than the defaults (STRING at DMP 0: -11.8, LEV 127,
+// PLAITS VOL 127) the knee rounds the peaks toward -12 dBFS, never a hard clip. The rows are requantised (Q15,
+// rounded, no dither): a quiet engine keeps 1.5 bits fewer above the int16 floor.
+constexpr float kVoiceGain = 0.35f;
 uint32_t render_voices(int16_t (*ring)[kVoices], int ring_len, int w, int v0, int v1, uint64_t* mach,
                        int16_t (*ring_r)[kVoices] = nullptr, uint8_t* st = nullptr);
 // DSP SAMPLE's DEC on PRE / POST (core/fx/out.h): its trig / note-off counters (the control core bumps, the render

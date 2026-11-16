@@ -51,7 +51,10 @@ constexpr int kTracks = 4;     // seq tracks at once
 constexpr int kRytmTracks = 12;
 constexpr uint8_t kTickCmd = 0x2C, kStateCmd = 0x2D, kMaskCmd = 0x2E, kPageLedsCmd = 0x2F;
 enum : uint8_t { kTransport = 1, kPattern = 2, kSwitch = 3, kScale = 4, kMutes = 5, kRec = 6, kTempo = 7, kSeqMode = 8,
-                 kPos = 9, kEdit = 10, kDirty = 11, kFill = 12, kSolo = 13 };   // kSolo: fix1049 (rytm-mods 0026 1049)
+                 kPos = 9, kEdit = 10, kDirty = 11, kFill = 12, kSolo = 13,   // kSolo: fix1049 (rytm-mods 0026 1049)
+                 kQperf = 14, kSceneRep = 15,   // 0.5.0: the QUICK PERF knob, the Rytm's scene (core/mod/scene.h)
+                 kHostAck = 16,     // 0.5.0: the mod command's answer (core/mod/rytm_out.h)
+                 kPmStatus = 17 };  // 0.5.0: the Rytm's params' STATUS answer (core/mod/rytm_param.h op 07)
 // 2D 0A EDIT's ops (rytm-mods 0026 "1033"): the stock edit functions the Rytm ran (src 0) or seq mode's own gesture
 // (src 1: a host trig / PAGE held + FUNC + RECORD / STOP / PLAY)
 enum : uint8_t { kPCopy = 1, kPPaste, kPClear, kPUndo, kTCopy, kTPaste, kTClear, kTUndo, kGCopy, kGPaste, kGClear, kGUndo,
@@ -80,6 +83,18 @@ struct Note {
 // step only (a set's lock holds to the next trig: these end at the next step), never sliding. A file with one carries kBlkArp, required.
 constexpr int kLocks = 12;          // locks a step
 constexpr int kLockFx = 16, kLockIns = 24, kLockArp = 32, kArpLocks = 5, kLockParams = 37;
+// 0.5.0 (rytm-param-mod 5.4): kLockRytm + w, the Rytm's own word w of the poly track's Rytm track: its LFO (1..8, not 4
+// DST) and FILTER / AMP (25..41) - its synth and sample words are the Sidecar machine's P1..P16, locked as such. Applied
+// as an override on the Rytm (core/mod/rytm_param.h: the value, mix 1, a jump at the step's time + the lead), released
+// at the next step without it (the Rytm's own value back), at STOP. Not on a pinned track's envelope words (25..29,
+// 33..35: the host's envelope plays them). Never sliding (Step.slide is 32 bits). An older Sidecar drops them (>= 37).
+constexpr int kLockRytm = 64;
+inline bool rytm_lock(int param) {
+  int w = param - kLockRytm;
+  return (w >= 1 && w <= 8 && w != 4) || (w >= 25 && w <= 41);
+}
+inline bool lock_param_ok(int param) { return (param >= 0 && param < kLockParams) || rytm_lock(param); }
+inline bool rytm_env_word(int w) { return (w >= 25 && w <= 29) || (w >= 33 && w <= 35); }
 constexpr uint8_t kArpLockMax[kArpLocks] = {5, 5, 2, 2, 2};
 inline bool arp_lock(int param) { return param >= kLockArp && param < kLockArp + kArpLocks; }
 inline int lock_top(int param) { return arp_lock(param) ? kArpLockMax[param - kLockArp] : 127; }   // a lock's largest integer part
@@ -204,6 +219,7 @@ const char* speed_name(int spd);     // "FOLLOW" "1/8" .. "7/8"
 bool speed_elektron(int spd);        // one of Elektron's set (the knob's main range; the others on FUNC: Q8)
 int speed_parse(const char* s);      // "follow" / "1/2" / "3/2" / "2" ... -> the id, -1 none
 int speed_step(int spd, int d, bool func);   // the knob: d steps through Elektron's set (func: every ratio, by size)
+int speed_pos(int spd);              // its place in the knob's order, 0 (1/8) .. kSpeeds - 1 (2): the knob's arc
 // seqtop P1: the play directions' names ("FWD" "REV" "PEND" "PING" "RND" "BROWN"; kDir* in core/seq/rng.h)
 const char* dir_name(int dir);
 int dir_parse(const char* s);        // "fwd" / "REV" ... -> the id, -1 none
@@ -397,7 +413,7 @@ double step_frames(double bpm, int speed);        // frames of one step at bpm a
 void init();                                   // boot: the pattern buffers (heap)
 void reset();                                  // tests: everything stopped and empty, the latency default
 bool sysex(const uint8_t* d, int len);         // a whole 2C / 2D from the Rytm (true: it was one)
-void hello();                                  // the Rytm's hello (35): 2E again, a resync asked
+void hello(int up20 = -1);                     // the Rytm's hello (35, its uptime in 1/20 s, -1 unknown): 2E again, a resync asked
 // Clock-only tracks in the 2E (ticked in 2C, nothing else; core/song: BD while SONG RECORD is armed or replaying)
 void set_clock_tracks(uint16_t mask);
 // The arpeggiator (core/arp/arp.h): the tracks to pin as its notes are the host's, and whether it wants the clock (BD's ticks)
@@ -495,6 +511,7 @@ struct View {
   int prompt_why;         // kPromptExplain: 0 an analog machine, 2 JUNO (mono), 3 another mono Sidecar machine
   int prompt_sel;         // kPromptMenu: the row (0 BACK, 1 TURN OFF, 2 LENGTH, 3 QUANTISE)
   bool off_hint;          // R2: B was turned down on a poly track (the footer says how to turn it off)
+  bool can_make;          // the shown track can be made a poly track (a Sidecar machine; not the Rytm's own synth)
   int lock_page;          // trigs held + a page key: kLp* (the held steps' locks), -1 none
   bool view_opened;       // the Rytm's TRK + TRIG opened the page (NO closes it; rui1036's FUNC + LFO)
   bool trigview;          // rui1040: the TRIG key's view (the step's / the track's trig values), else the notes
@@ -592,6 +609,11 @@ void level_taken(int rytm);
 uint32_t note_edit_work();   // tests: the last move's work (targets checked over the shifts tried)
 // the touchscreen moved a note (seqed=move): NOTE EDIT's highlight / selection go with it on Rytm track rytm
 void note_moved(int rytm, int from_idx, int from_pitch, int to_idx, int to_pitch);
+// The web's NOTE EDIT (docs/TOUCH-EDITOR.md "NOTE EDIT from the web"; pi/engine/seqed_pi.cpp): one "seqed=nsel / nset /
+// nclr / nedit / ndel / noff" line run as the Rytm's DATA push and A..E would (one selection, one undo history). shown:
+// the track the web shows (-1: any). -1: not one of these; -2: a bad one; 0: refused or nothing done (out says why); 1:
+// the selection / highlight / NOTE EDIT's state changed; 2: the track's notes changed too (replanned and saved).
+int note_edit_line(const char* line, int shown, char* out, int cap);
 void view_set(int track, int page, int held, bool follow);   // tests and the renderer
 struct Stats {
   uint32_t ticks, ticks_bad, states, switches, notes_on, notes_off, late, late_frames_max, cancelled, dropped_queue;
