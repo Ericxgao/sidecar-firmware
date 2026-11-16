@@ -12,7 +12,7 @@ Pi 4B is the main target, and the one the measurements are made on; the Pi 5 sca
 > and in the history (commit `101a3fb`) for reference, and the 0.1.0 release stays downloadable.
 
 This repository holds the source of **Sidecar 0.5.0**. It adds the SAMPLER machine (a Digitakt-style sample player
-next to DSP SAMPLE), CHOP (up to 64 slices of one sample, with RESAMPLE), SAMPLE EDIT, FILL (UP + RIGHT: p-locks a
+next to DSP SAMPLE), a better CHOP (per-slice POLY and GATE, ALL-slice editing, RESAMPLE), SAMPLE EDIT, FILL (UP + RIGHT: p-locks a
 range of values onto a track's trigs), the sample browser's preview, quick load and file menu, the Rytm's own
 parameters on the XY pad, MIDI learn and poly-track p-locks, an A and a B LFO on each track, user send effects (Plugin
 API 3: PHASER, BBD, NIMBUS and GALACTIC) and the MIST texture machine, send FX as inserts on the bus chains, send FX
