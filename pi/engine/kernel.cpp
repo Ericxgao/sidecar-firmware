@@ -35,8 +35,6 @@ static volatile unsigned s_nTempC;	// the SoC temperature as the stats line last
 #include "seqed_pi.h"
 #include "rytmpat_pi.h"		// the Rytm pattern view (its SysEx dump)
 #include "../ui/sidecar_rytmpat.h"
-static rytm_pattern_t s_RytmPat;	// the newest decoded Rytm pattern: the PAT page's, VOICE's p-locks
-static int s_nRytmPatIndex = -1;
 #endif
 
 #include <circle/alloc.h>
@@ -68,10 +66,16 @@ static int s_nRytmPatIndex = -1;
 #include "sendfx_pi.h"
 #include "paircode_pi.h"	// the pairing code that gates the network (paircode.h)
 #include "usbc_pi.h"		// the USB-C mode for the SIDECAR MENU > USB-C (usb_mode.h)
+#include "ui_contrast.h"	// the SIDECAR theme's high contrast (uicontrast=)
+#include "ui_style.h"	// the display theme's words (uistyle=)
 #include "midibridge_pi.h"	// the Rytm MIDI bridge (midibridge.h): off at every boot
 #include "sdfiles.h"
 #include "wifi.h"
 #include "usbnet_pi.h"		// the USB-C network (docs/usb-network.md)
+#include "remote_pi.h"		// the remote UI over the USB-C cable (docs/remote-ui.md)
+#include "../ui/remote/rmt_seqview.h"	// its play head and PAT views
+#include "remote_views_pi.h"	// its views, built with or without a display
+#include "pwrbtn.h"		// the card drain's cap and its settle rule (the power-off's, and the restart the late-computer prompt asks for)
 #include "update_pi.h"		// the firmware update from the web page (docs/web-update.md)
 #include "rec_pi.h"
 #include "bundle_pi.h"		// project bundles (core/bundle, docs/BUNDLES.md)
@@ -216,6 +220,7 @@ CKernel::CKernel (void)
 	memset (&m_Ui, 0, sizeof m_Ui);
 	m_Ui.screensaver = -1;
 	for (unsigned c = 0; c < SIDECAR_UI_CORES; c++) m_Ui.load[c] = -1;
+	for (unsigned v = 0; v < SIDECAR_UI_TRACKS; v++) m_Ui.vload[v] = -1;
 	// no m_ActLED.Blink (3) (the skeleton's): it held the boot 2.1 s before the first log line (measured 2026-10-16);
 	// the boot screen shows the start now
 }
@@ -330,7 +335,7 @@ boolean CKernel::Initialize (void)
 		unsigned ts = m_Timer.GetClockTicks ();
 		m_pDisplay = new CSidecarDisplay (m_Options.GetWidth (), m_Options.GetHeight ());
 		const char *pStyle = m_Options.GetAppOptionString ("uistyle", 0);	// the card is not read yet: cmdline only
-		sidecar_splash_style (pStyle != 0 && (strcmp (pStyle, "sidecar") == 0 || strcmp (pStyle, "classic") == 0) ? 1 : 0);
+		sidecar_splash_style (ui_style::parse (pStyle) > 0 ? 1 : 0);	// SIDECAR and GRID: the SIDECAR boot screen
 		if (!m_pDisplay->Splash ()) m_Logger.Write (From, LogNotice, "boot screen: no frame buffer");
 		else m_Logger.Write (From, LogNotice, "boot screen: %ux%u in %u us", m_pDisplay->GetFrameWidth (),
 				     m_pDisplay->GetFrameHeight (), m_Timer.GetClockTicks () - ts);
@@ -549,6 +554,10 @@ boolean CKernel::Initialize (void)
 	}
 	if (!bUsbNet && m_pSidecar != 0 && m_pSidecar->NetInDevice ()) m_pSidecar->NetDetach ();	// told "not connected"
 	usbnet_pi::Gadget (m_pSidecar);			// its late link: the page offers a reboot onto USB-C
+	// net=auto chose another network because no computer was on the cable: one that starts its USB network later is asked about on
+	// the touchscreen (usbnet_cfg.h LatePrompt); a unit with no touch device never asks (the page's Reboot onto USB-C remains): a display
+	// alone is not enough, the touch screen (USB digitizer or DSI touch, CSidecarDisplay::HasTouchScreen) is looked for every loop
+	m_bLateAsk = UsbPlan == usbnet::kProbe && !bUsbNet;
 	u8 UsbClient[4];
 	usbnet::client_ip (UsbOpt.ip, UsbClient);
 	if (bUsbNet)
@@ -602,6 +611,11 @@ boolean CKernel::Initialize (void)
 		m_Logger.Write (From, LogNotice, "web: on (sidecar.local once the Ethernet link is up; web=0 turns it off)");
 	}
 	else m_Logger.Write (From, LogNotice, "web: off");
+	// the remote UI on TCP 7340 (remote_pi.h, docs/remote-ui.md): the USB-C cable only (a Wi-Fi or Ethernet boot never opens
+	// the port); the views are built in the kernel's loop from the engine's state, so it needs no display (docs/remote-ui.md "No touch
+	// screen"); remote=0 turns it off
+	if (m_bNetOK && bUsbNet && m_Options.GetAppOptionDecimal ("remote", 1) != 0)
+		remote_pi::Start (&m_Net, &m_Console, SIDECAR_VERSION);
 	// the SD card's boot files on TCP 7310 (sdfiles.h, pi/circle/sdboot.py: install to SD); sdport=0 turns it off
 	if (m_bNetOK && m_Options.GetAppOptionDecimal ("sdport", 1) != 0) new CSdFiles (&m_Net);
 	new CSdFiles (0, &m_Serial);		// and on the serial port after the console's ":sdf"
@@ -1204,6 +1218,7 @@ void CKernel::SetSelfTest (boolean bOn, const char *pWhy)
 }
 
 static int s_nUiLook;			// UX review L1: the OLED look (0 studio, 1 stage), /.rytm/display.txt's uilook=
+static int s_nUiContrast;		// 0.5.1: the SIDECAR theme's high contrast (0 off, 1 blue, 2 green, 3 viper), display.txt's uicontrast=
 
 boolean CKernel::Core0Command (const char *pCmd, void *pParam)
 {
@@ -1225,9 +1240,8 @@ boolean CKernel::Core0Command (const char *pCmd, void *pParam)
 	{
 		if (pCmd[7] == '=')
 		{
-			int n = strcmp (pCmd + 8, "oled") == 0 || strcmp (pCmd + 8, "0") == 0 ? 0
-				: strcmp (pCmd + 8, "sidecar") == 0 || strcmp (pCmd + 8, "classic") == 0 || strcmp (pCmd + 8, "1") == 0 ? 1 : -1;
-			if (n < 0) pThis->m_Logger.Write (From, LogWarning, "uistyle=oled|sidecar");
+			int n = ui_style::parse (pCmd + 8);
+			if (n < 0) pThis->m_Logger.Write (From, LogWarning, "uistyle=oled|sidecar|grid");
 			else
 			{
 				pThis->m_nUiStyle = (unsigned) n;
@@ -1239,7 +1253,7 @@ boolean CKernel::Core0Command (const char *pCmd, void *pParam)
 				}
 			}
 		}
-		pThis->m_Logger.Write (From, LogNotice, "display: UI style %s", pThis->m_nUiStyle ? "sidecar" : "oled");
+		pThis->m_Logger.Write (From, LogNotice, "display: UI style %s", ui_style::name ((int) pThis->m_nUiStyle));
 		return TRUE;
 	}
 	if (strncmp (pCmd, "uilook", 6) == 0 && (pCmd[6] == 0 || pCmd[6] == '='))	// UX review L1: the OLED look
@@ -1257,6 +1271,22 @@ boolean CKernel::Core0Command (const char *pCmd, void *pParam)
 			}
 		}
 		pThis->m_Logger.Write (From, LogNotice, "display: look %s", s_nUiLook ? "stage" : "studio");
+		return TRUE;
+	}
+	if (strncmp (pCmd, "uicontrast", 10) == 0 && (pCmd[10] == 0 || pCmd[10] == '='))	// 0.5.1: the SIDECAR theme's high contrast
+	{
+		if (pCmd[10] == '=')
+		{
+			int n = ui_contrast::parse (pCmd + 11);
+			if (n < 0) pThis->m_Logger.Write (From, LogWarning, "uicontrast=off|blue|green|viper");
+			else
+			{
+				s_nUiContrast = n;
+				pThis->m_bSaveDisplay = TRUE;
+				if (pThis->m_pDisplay != 0) { pThis->m_pDisplay->Activity (); pThis->PushUi (); }
+			}
+		}
+		pThis->m_Logger.Write (From, LogNotice, "display: contrast %s", ui_contrast::name (s_nUiContrast));
 		return TRUE;
 	}
 	if (strncmp (pCmd, "cpumhz", 6) == 0 && (pCmd[6] == 0 || pCmd[6] == '='))	// Settings > System: the CPU clock option
@@ -1422,7 +1452,7 @@ void CKernel::LoadDisplayRes (boolean bCard)
 	if (m_nResW) m_Logger.Write (From, LogNotice, "display: res=%ux%u", m_nResW, m_nResH);
 }
 
-// /.rytm/display.txt: "screensaver=MIN", "brightness=PCT", "touchtest=0|1" and "uistyle=oled|sidecar" lines
+// /.rytm/display.txt: "screensaver=MIN", "brightness=PCT", "touchtest=0|1" and "uistyle=oled|sidecar|grid" lines
 // (SIDECAR replaced the CLASSIC theme under its id 1, so an older card's "classic" is read as "sidecar" and
 // written back as "sidecar" at the next save); cmdline.txt's same keys win
 static core::fmt::KvKeep s_DisplayKeep;		// display.txt's lines a newer build wrote: written back unchanged
@@ -1442,7 +1472,7 @@ void CKernel::LoadDisplaySettings (boolean bCard)
 			f_close (&f);
 		}
 		Text[n] = 0;
-		static const char *const Known[] = {"screensaver", "brightness", "touchtest", "uistyle", "uilook", "res", "touchcal", "cpumhz",
+		static const char *const Known[] = {"screensaver", "brightness", "touchtest", "uistyle", "uilook", "uicontrast", "res", "touchcal", "cpumhz",
 						    "usbmode",
 #if RASPPI >= 5
 						    "fan",	// a Pi 4 build carries it (class S)
@@ -1472,17 +1502,7 @@ void CKernel::LoadDisplaySettings (boolean bCard)
 	m_nSaverMin = Value ("screensaver", 60, 0, 1440);
 	m_nBright = Value ("brightness", 100, 5, 100);
 	m_bTouchHidden = Value ("touchtest", 1, 0, 1) == 0;
-	auto Style = [&] (const char *p) -> int		// "oled" / "sidecar" (older cards: "classic"; or 0 / 1), -1: neither
-	{
-		if (p == 0) return -1;
-		auto End = [] (char c) { return c == 0 || c == '\n' || c == '\r'; };
-		if ((strncmp (p, "oled", 4) == 0 && End (p[4])) || (*p == '0' && End (p[1]))) return 0;
-		if ((strncmp (p, "sidecar", 7) == 0 && End (p[7])) || (strncmp (p, "classic", 7) == 0 && End (p[7])) || (*p == '1' && End (p[1])))
-			return 1;
-		return -1;
-	};
-	const char *ps = strstr (Text, "uistyle=");
-	int nStyle = Style (ps ? ps + 8 : 0), nCmd = Style (m_Options.GetAppOptionString ("uistyle", 0));
+	int nStyle = ui_style::from_text (Text), nCmd = ui_style::parse_line (m_Options.GetAppOptionString ("uistyle", 0));	// ("oled", "sidecar", "guide"; older cards "classic" = sidecar)
 	m_nUiStyle = nCmd >= 0 ? (unsigned) nCmd : nStyle >= 0 ? (unsigned) nStyle : 0;
 	m_Ui.ui_style = (int) m_nUiStyle;
 	{
@@ -1490,6 +1510,8 @@ void CKernel::LoadDisplaySettings (boolean bCard)
 		s_nUiLook = pl && strncmp (pl + 7, "stage", 5) == 0 ? 1 : 0;
 		sidecar_dot_look (s_nUiLook);
 		m_Ui.ui_look = s_nUiLook;
+		s_nUiContrast = ui_contrast::from_text (Text);		// off without the key or with a word not known
+		m_Ui.ui_contrast = s_nUiContrast;
 	}
 	m_Ui.screensaver = (int) m_nSaverMin;
 	m_Ui.brightness = (int) m_nBright;
@@ -1509,15 +1531,15 @@ void CKernel::LoadDisplaySettings (boolean bCard)
 	}
 	if (m_pDisplay != 0) m_pDisplay->SetScreensaver (m_nSaverMin);
 	m_Logger.Write (From, LogNotice, "display: screensaver %u min, brightness %u %%, UI style %s (%s)", m_nSaverMin, m_nBright,
-			m_nUiStyle ? "sidecar" : "oled", Text[0] ? "/.rytm/display.txt" : "defaults");
+			ui_style::name ((int) m_nUiStyle), Text[0] ? "/.rytm/display.txt" : "defaults");
 }
 
 void CKernel::SaveDisplaySettings (void)
 {
 	m_bSaveDisplay = FALSE;
 	CString s;
-	s.Format ("screensaver=%u\nbrightness=%u\ntouchtest=%u\nuistyle=%s\nuilook=%s\n", m_nSaverMin, m_nBright, m_bTouchHidden ? 0u : 1u,
-		  m_nUiStyle ? "sidecar" : "oled", s_nUiLook ? "stage" : "studio");
+	s.Format ("screensaver=%u\nbrightness=%u\ntouchtest=%u\nuistyle=%s\nuilook=%s\nuicontrast=%s\n", m_nSaverMin, m_nBright, m_bTouchHidden ? 0u : 1u,
+		  ui_style::name ((int) m_nUiStyle), s_nUiLook ? "stage" : "studio", ui_contrast::name (s_nUiContrast));
 	if (m_bTouchCal)
 	{
 		char b[64];
@@ -1795,6 +1817,13 @@ void CKernel::UpdateMIDI (void)
 // shortly after a display command.
 void CKernel::PushUi (void)
 {
+	FillUi ();
+	if (m_pDisplay != 0) m_pDisplay->SetStatus (m_Ui);
+}
+
+// m_Ui from the engine's state: what the display shows, and what the remote UI's STATUS view copies (a Pi with no screen too)
+void CKernel::FillUi (void)
+{
 	sidecar_ui_status_t &u = m_Ui;
 	u.rytm = CObUsb::Streaming () || m_pMIDI != 0;
 	u.underruns = g_Output.Underflows ();
@@ -1825,6 +1854,7 @@ void CKernel::PushUi (void)
 	u.touch_hidden = m_bTouchHidden;
 	u.ui_style = (int) m_nUiStyle;
 	u.ui_look = s_nUiLook;
+	u.ui_contrast = s_nUiContrast;
 	u.temp_c = (int) m_nTempC;		// the temperature warning's banner (thermal.h)
 	u.temp_warn = m_Thermal.warn ? 1 : 0;
 	u.lfo_full = bridge::lfo_link_full () ? 1 : 0;	// 0.5.0 LFO FINAL: "RYTM LINK FULL: LFOs update slower" (a plain read)
@@ -1873,7 +1903,6 @@ void CKernel::PushUi (void)
 	strncpy (u.build, SIDECAR_VERSION_FULL, sizeof u.build - 1);
 	Text.Format ("%s %s", CIRCLE_NAME, CIRCLE_VERSION_STRING);
 	strncpy (u.circle, (const char *) Text, sizeof u.circle - 1);
-	m_pDisplay->SetStatus (u);
 }
 
 // A display control (core 0, inside the display's Update): the serial console's parser, as the web page does. The
@@ -1975,6 +2004,107 @@ boolean CKernel::UsbCommand (const char *pCmd)
 // the page is filled (kernel's state, status_pi's core part)
 static sidecar_status_view_t s_StatusView;
 
+// ---- the remote UI's views (remote_views_pi.h): the three sides the portable feed is given ------------------------------------
+
+static remote_views::Feed s_RemoteViews;
+
+class CKernelRemote : public remote_views::Remote
+{
+public:
+	bool Gate (int nView, bool bLocalShown) override	{ return remote_pi::Gate (nView, bLocalShown); }
+	bool Offer (int nView, const void *pView) override	{ return remote_pi::Offer (nView, pView); }
+	bool Due (int nView) override				{ return remote_pi::Due (nView); }
+};
+
+// what the views are built from: the engine's state only (no page, no LVGL object)
+class CKernelEngine : public remote_views::Engine
+{
+public:
+	explicit CKernelEngine (CKernel *pKernel) : m_pK (pKernel) {}
+	unsigned NowUs () override		{ return m_pK->m_Timer.GetClockTicks (); }
+	const char *Project () override	{ return m_pK->m_Ui.project; }
+#if SIDECAR_SEQED
+	bool SeqView (sidecar_seq_view_t *v, unsigned *pSeen) override	{ return seqed_pi::View (v, pSeen); }
+	int Playhead () override		{ return seqed_pi::Playhead (); }
+	void RytmPatWant (int nPage) override	{ rytmpat_pi::Want (nPage); }
+	bool RytmPattern (rytm_pattern_t *p, int *pIndex, unsigned *pSeen) override	{ return rytmpat_pi::Pattern (p, pIndex, pSeen); }
+	void RytmPatWhere (remote_views::PatWhere *w) override
+	{
+		rytmpat_pi::State St = rytmpat_pi::Get ();
+		CString Where;
+		if (St.age_ms < 0) Where = St.pending ? "fetching..." : St.lost ? "no answer from the Rytm" : "waiting";
+		else if (St.pending) Where = "fetching...";
+		else if (St.lost) Where.Format ("no answer, %d s old", St.age_ms / 1000);
+		else if (St.stale == 2) Where = "edited: updates after STOP";
+		else if (St.stale) Where = "edited: updates when edits settle";
+		else if (St.age_ms < 2000) Where = "from the Rytm";
+		else Where.Format ("from the Rytm %d s ago", St.age_ms / 1000);
+		strncpy (w->text, (const char *) Where, sizeof w->text - 1);
+		w->stale = St.pending || St.lost || St.stale;
+	}
+#endif
+	void VoiceFill (sidecar_voice_view_t *v, const rytm_pattern_t *pat, int nPatIndex) override	{ voice_pi::Fill (v, pat, nPatIndex); }
+	sidecar_status_view_t *StatusView () override	{ return &s_StatusView; }
+	void StatusFill (sidecar_status_view_t *v) override
+	{
+		const sidecar_ui_status_t &Ui = m_pK->m_Ui;
+		sidecar_status_view_t &sv = *v;
+		status_pi::Core (&sv);
+		lib_pi::ui_fill (&sv);
+		sv.underruns = Ui.underruns, sv.rytm = Ui.rytm, sv.mac = Ui.mac;
+		memcpy (sv.fx_type, Ui.fx_type, sizeof sv.fx_type);
+		memcpy (sv.fx_post, Ui.fx_post, sizeof sv.fx_post);
+		memcpy (sv.ip, Ui.ip, sizeof sv.ip);
+		memcpy (sv.host, Ui.host, sizeof sv.host);
+		memcpy (sv.link, Ui.link, sizeof sv.link);
+		memcpy (sv.gadget, Ui.gadget, sizeof sv.gadget);
+		if (!strcmp (sv.gadget, "0")) sv.gadget[0] = 0;
+		memcpy (sv.build, Ui.build, sizeof sv.build);
+		memcpy (sv.circle, Ui.circle, sizeof sv.circle);
+		rec_pi::CardSpace (&sv.card_free_mb, &sv.card_total_mb);
+		stor_pi::UiFill (&sv);	// the USB drive, the NVMe SSD
+		paircode_pi::UiFill (&sv);	// the PAIR CODE row (the code is on the screen, not in a log)
+	}
+	void InsFill (sidecar_insfx_view_t *v) override
+	{
+		float Pk[8][2];
+		g_Output.TakeVoicePeaks (Pk);	// the OUT route's meters (PRE / POST voices),
+		g_PeakFan.feed_voices (Pk);	// shared with the web's "levels" (peak_fan.h)
+		g_PeakFan.take_voices (peakfan::kDisplay, Pk);
+		insfx_pi::Fill (v, Pk);
+	}
+	void MfxFill (sidecar_mfx_view_t *v) override	{ insfx_pi::FillMaster (v); }
+private:
+	CKernel *m_pK;
+};
+
+// the touch screen's end (the only place the views meet LVGL's setters); not made when the Pi has no screen
+class CKernelDisplay : public remote_views::Display
+{
+public:
+	explicit CKernelDisplay (CKernel *pKernel) : m_pK (pKernel) {}
+	bool SeqShown () override	{ return sidecar_ui_page () == 4; }
+	bool PatShown () override	{ return sidecar_rytmpat_shown () != 0; }
+	bool VoiceShown () override	{ return sidecar_voice_shown () != 0; }
+	bool StatusShown () override	{ return sidecar_status_shown () != 0; }
+	bool InsShown () override	{ return sidecar_insfx_shown () != 0; }
+	bool MfxShown () override	{ return sidecar_mfx_shown () != 0; }
+#if SIDECAR_SEQED
+	void SeqView (const sidecar_seq_view_t *v) override	{ sidecar_seqed_view (v); }
+	void ShowSeq () override	{ sidecar_ui_show (4); }
+	void Playhead (int nPlay) override	{ sidecar_seqed_playhead (nPlay); }
+	void RytmPat (const rytm_pattern_t *p, int nIndex, const char *pProject) override	{ sidecar_rytmpat_set (p, nIndex, pProject, "", "from the Rytm"); }
+	void RytmPatWhere (const char *pText, int nStale) override	{ sidecar_rytmpat_where (pText, nStale); }
+#endif
+	void VoiceSet (const sidecar_voice_view_t *v) override	{ sidecar_voice_set (v); }
+	unsigned UiMaxUs () override	{ return m_pK->m_pDisplay->PeekMaxUpdateUs (); }
+	void StatusSet (const sidecar_status_view_t *v) override	{ sidecar_status_set (v); }
+	void InsSet (const sidecar_insfx_view_t *v) override	{ sidecar_insfx_set (v); }
+	void MfxSet (const sidecar_mfx_view_t *v) override	{ sidecar_mfx_set (v); }
+private:
+	CKernel *m_pK;
+};
+
 // the output's peak since the last stats line, shared with the web's "levels" (peak_fan.h)
 static float StatsPeak (void)
 {
@@ -2037,7 +2167,7 @@ void CKernel::LogStats (void)
 		for (int i = 0; i < 5; i++) strncpy (More.user[i], Uv.slot[i].name, sizeof More.user[i] - 1);
 	bridge::rui_status (m_pTransport->Running () ? 1 : 0, g_Output.Underflows (), (int) (c1 + 5) / 10, (int) (c2 + 5) / 10,
 			    (int) (c3 + 5) / 10, &More);
-	if (m_pDisplay != 0)
+	if (m_pDisplay != 0 || remote_pi::Running ())		// the display's numbers, and the remote UI's STATUS view (no screen needed)
 	{
 		static unsigned s_nBlocksTotal;
 		s_nBlocksTotal += s.nBlocks;
@@ -2052,6 +2182,7 @@ void CKernel::LogStats (void)
 		{
 			sv.vload[v] = (int) (s.nVoice[v] * 1000 / s.nTicks);	// tenths of a percent of one render core
 			sv.muted[v] = g_Guard.Muted ((unsigned) v) ? 1 : 0;
+			if (v < SIDECAR_UI_TRACKS) m_Ui.vload[v] = sv.vload[v], m_Ui.vmuted[v] = sv.muted[v];	// HOME > Overview's voice tiles
 		}
 		for (int c = 0; c < SST_CORES; c++) sv.load[c] = m_Ui.load[c];
 		sv.block_max_us = s.nMaxBlockUs, sv.block_budget_us = bridge::kBlock * 1000000 / 48000;
@@ -2063,9 +2194,9 @@ void CKernel::LogStats (void)
 		sv.blocks = s_nBlocksTotal;
 		sv.ob = m_pTransport->Running () ? 1 : 0;
 		sv.net = nNet, sv.wifi = bWifi ? 1 : 0;
-		PushUi ();
+		PushUi ();					// (m_Ui for the STATUS view; the screen too when there is one)
 		static unsigned s_nDisplayLog;
-		if (++s_nDisplayLog % 10 == 0)			// every 10 s: the redraw cost on this core
+		if (m_pDisplay != 0 && ++s_nDisplayLog % 10 == 0)	// every 10 s: the redraw cost on this core
 			m_Logger.Write (From, LogNotice, "display: %ux%u, input %s, longest update %u us%s%s", m_pDisplay->GetWidth (),
 					m_pDisplay->GetHeight (), m_pDisplay->GetInput (), m_pDisplay->TakeMaxUpdateUs (),
 					m_pDisplay->TakeRotateDiag (), m_pDisplay->TakeTouchDiag ());
@@ -2397,6 +2528,28 @@ void CKernel::BootStep (unsigned nStep)
 	if (m_pDisplay != 0) m_pDisplay->SplashStep (nStep);
 }
 
+// The card's work before a restart the owner asked for, as the power-off's drain (StopAndPowerOff): a take ends, core 3's saves
+// settle, the posted writes go out - at most pwrbtn::kDrainCapUs. FALSE: it did not settle (the caller does not reboot).
+boolean CKernel::DrainForRestart (void)
+{
+	g_Rec.stop ();						// a take ends: its files closed in the drain
+	if (m_bSaveDisplay) SaveDisplaySettings ();
+	bridge::save_flush (true);				// core 3's idle saves: the settle waits skipped
+	pwrbtn::Drain Drain (m_Timer.GetClockTicks ());
+	rec::Status s;
+	boolean bDone;
+	do
+	{
+		bridge::card_service (8);
+		rec_pi::Poll ();
+		g_Rec.status (&s, false);
+		asm volatile ("dsb sy; sev");			// core 3 out of its wfe: its idle saves run
+		bDone = Drain.Done (s.state == rec::Recorder::kIdle && bridge::save_settled (), m_Timer.GetClockTicks ());
+	}
+	while (!bDone);
+	return !Drain.TimedOut (m_Timer.GetClockTicks ());
+}
+
 void CKernel::StopAndReboot (const char *pWhy, boolean bTryboot)
 {
 	m_Logger.Write (From, LogNotice, "reboot: %s - stopping the %s stream first", pWhy, m_pTransport->Name ());
@@ -2585,54 +2738,22 @@ void CKernel::Run (void)
 #endif
 		blackbox_pi::Poll ();						// the log to /.rytm/blackbox.log (its own crumb section, 42)
 		{ mbtrace::Scope Mb (20, 200); bridge::samp_poll (); }			// SAMPLING / the AUTO-SAMPLER: a take's step (core/samp)
+		if (m_pDisplay != 0 || remote_pi::Running ())		// the remote UI's views: from the engine's state, a screen or none
+		{
+			crumb::Section Cs (23);
+			CKernelRemote Remote;
+			CKernelEngine Engine (this);
+			if (m_pDisplay != 0)
+			{
+				CKernelDisplay Local (this);
+				s_RemoteViews.Run (Remote, Engine, &Local);
+			}
+			else s_RemoteViews.Run (Remote, Engine, 0);	// no screen: nothing is shown, no LVGL call is made
+		}
 		if (m_pDisplay != 0)
 		{
 			crumb::Section Cs (23);
-#if SIDECAR_SEQED
-			{					// the SEQ page: core 3's published view (when new) and the play head
-				static sidecar_seq_view_t s_SeqView;
-				static unsigned s_nSeqSeen;
-				if (seqed_pi::View (&s_SeqView, &s_nSeqSeen))
-				{
-					strncpy (s_SeqView.project, m_Ui.project, sizeof s_SeqView.project - 1);
-					sidecar_seqed_view (&s_SeqView);
-					static unsigned s_nShowReq;
-					if (s_SeqView.show_req != s_nShowReq)	// seq-ux: TRK + TRIG on the Rytm (rui1037; rui1036 FUNC + LFO): the SEQ page
-					{
-						s_nShowReq = s_SeqView.show_req;
-						sidecar_ui_show (4);
-					}
-				}
-				sidecar_seqed_playhead (seqed_pi::Playhead ());
-			}
-			{					// the Rytm pattern view: fetched while open, its age / fetching shown
-				static unsigned s_nPatSeen, s_nPatAt;
-				int nPage = sidecar_rytmpat_shown () ? 1 : sidecar_voice_shown () ? 2 : 0;	// (VOICE: the track's p-locks)
-				int bOpen = nPage != 0;
-				rytmpat_pi::Want (nPage);
-				int nIndex;
-				if (rytmpat_pi::Pattern (&s_RytmPat, &nIndex, &s_nPatSeen))
-				{
-					s_nRytmPatIndex = nIndex;
-					sidecar_rytmpat_set (&s_RytmPat, nIndex, m_Ui.project, "", "from the Rytm");
-				}
-				unsigned nNow = m_Timer.GetClockTicks ();
-				if (bOpen && nNow - s_nPatAt >= 250000)
-				{
-					s_nPatAt = nNow;
-					rytmpat_pi::State St = rytmpat_pi::Get ();
-					CString Where;
-					if (St.age_ms < 0) Where = St.pending ? "fetching..." : St.lost ? "no answer from the Rytm" : "waiting";
-					else if (St.pending) Where = "fetching...";
-					else if (St.lost) Where.Format ("no answer, %d s old", St.age_ms / 1000);
-					else if (St.stale == 2) Where = "edited: updates after STOP";
-					else if (St.stale) Where = "edited: updates when edits settle";
-					else if (St.age_ms < 2000) Where = "from the Rytm";
-					else Where.Format ("from the Rytm %d s ago", St.age_ms / 1000);
-					sidecar_rytmpat_where ((const char *) Where, St.pending || St.lost || St.stale);
-				}
-			}
-#endif
+			remote_pi::Page (sidecar_ui_page ());		// (the remote UI's Follow: a Pi with no screen has no page to send)
 			{					// rui1036b: the Rytm's UP + T1..T5 (the page), VOICE following its track
 				static uint32_t s_nReqSeen, s_nTrkSeen;
 				static int s_bReqInit;
@@ -2659,22 +2780,6 @@ void CKernel::Run (void)
 				}
 				if (nPg >= 0 && nPg != nCur) sidecar_ui_show (nPg);
 				sidecar_ui_combo_map (voice_pi::ComboMap ());	// UX review N3: UP held on the Rytm: the map here too
-			}
-			if (sidecar_voice_shown ())		// the VOICE page: ~10 frames a second, redrawn only on a change
-			{
-				static sidecar_voice_view_t s_VoiceView;
-				static unsigned s_nVoiceAt;
-				unsigned nNow = m_Timer.GetClockTicks ();
-				if (nNow - s_nVoiceAt >= 100000)
-				{
-					s_nVoiceAt = nNow;
-#if SIDECAR_SEQED
-					voice_pi::Fill (&s_VoiceView, s_RytmPat.valid ? &s_RytmPat : 0, s_nRytmPatIndex);
-#else
-					voice_pi::Fill (&s_VoiceView, 0, -1);
-#endif
-					sidecar_voice_set (&s_VoiceView);
-				}
 			}
 			{					// the SONG page: core 3's view (~10 a second while it shows), a replay to confirm shows it
 				song_pi::Want (sidecar_song_shown ());
@@ -2724,37 +2829,6 @@ void CKernel::Run (void)
 					sidecar_scope_set (&s_ScopeView);
 				}
 			}
-			if (sidecar_status_shown ())		// touch2: SIDECAR STATUS, twice a second (labels redrawn only on a change)
-			{
-				static unsigned s_nStatusAt;
-				unsigned nNow = m_Timer.GetClockTicks ();
-				if (nNow - s_nStatusAt >= 500000)
-				{
-					s_nStatusAt = nNow;
-					sidecar_status_view_t &sv = s_StatusView;
-					status_pi::Core (&sv);
-					lib_pi::ui_fill (&sv);
-					sv.underruns = m_Ui.underruns, sv.rytm = m_Ui.rytm, sv.mac = m_Ui.mac;
-					memcpy (sv.fx_type, m_Ui.fx_type, sizeof sv.fx_type);
-					memcpy (sv.fx_post, m_Ui.fx_post, sizeof sv.fx_post);
-					memcpy (sv.ip, m_Ui.ip, sizeof sv.ip);
-					memcpy (sv.host, m_Ui.host, sizeof sv.host);
-					memcpy (sv.link, m_Ui.link, sizeof sv.link);
-					memcpy (sv.gadget, m_Ui.gadget, sizeof sv.gadget);
-					if (!strcmp (sv.gadget, "0")) sv.gadget[0] = 0;
-					memcpy (sv.build, m_Ui.build, sizeof sv.build);
-					memcpy (sv.circle, m_Ui.circle, sizeof sv.circle);
-					rec_pi::CardSpace (&sv.card_free_mb, &sv.card_total_mb);
-					stor_pi::UiFill (&sv);	// the USB drive, the NVMe SSD
-					paircode_pi::UiFill (&sv);	// the PAIR CODE row (the code is on the screen, not in a log)
-					sv.ui_max_us = m_pDisplay->PeekMaxUpdateUs ();
-					u32 h = 2166136261u;
-					const u8 *b = (const u8 *) &sv;
-					for (unsigned i = 0; i < __builtin_offsetof (sidecar_status_view_t, gen); i++) h = (h ^ b[i]) * 16777619u;
-					sv.gen = h;
-					sidecar_status_set (&sv);
-				}
-			}
 			if (sidecar_project_shown ())		// PROJECT (bundles): the feed five times a second (labels redrawn only on a change)
 			{
 				static sidecar_project_view_t s_ProjView;
@@ -2767,34 +2841,6 @@ void CKernel::Run (void)
 					sidecar_project_set (&s_ProjView);
 				}
 			}
-			if (sidecar_insfx_shown ())		// fx-ins: the INSERT FX page, ~10 frames a second, redrawn only on a change
-			{
-				static sidecar_insfx_view_t s_InsView;
-				static unsigned s_nInsAt;
-				unsigned nNow = m_Timer.GetClockTicks ();
-				if (nNow - s_nInsAt >= 100000)
-				{
-					s_nInsAt = nNow;
-					float Pk[8][2];
-					g_Output.TakeVoicePeaks (Pk);	// the OUT route's meters (PRE / POST voices),
-					g_PeakFan.feed_voices (Pk);	// shared with the web's "levels" (peak_fan.h)
-					g_PeakFan.take_voices (peakfan::kDisplay, Pk);
-					insfx_pi::Fill (&s_InsView, Pk);
-					sidecar_insfx_set (&s_InsView);
-				}
-			}
-			if (sidecar_mfx_shown ())		// the MASTER FX page, the same way
-			{
-				static sidecar_mfx_view_t s_MfxView;
-				static unsigned s_nMfxAt;
-				unsigned nNow = m_Timer.GetClockTicks ();
-				if (nNow - s_nMfxAt >= 100000)
-				{
-					s_nMfxAt = nNow;
-					insfx_pi::FillMaster (&s_MfxView);
-					sidecar_mfx_set (&s_MfxView);
-				}
-			}
 			{	// 0.5.0: the MORPH page, its view built on core 3 (morph_pi), the newest taken here
 				static sidecar_morph_view_t s_MorphView;
 				static unsigned s_nMorphSeen;
@@ -2805,8 +2851,9 @@ void CKernel::Run (void)
 			{	// 0.5.0: the XY page, the same way (xypad_pi)
 				static sidecar_xy_view_t s_XyView;
 				static unsigned s_nXySeen;
-				xypad_pi::Want (sidecar_xy_shown (), sidecar_xy_picking () >= 0);	// (the picker: its names)
-				if (sidecar_xy_shown () && xypad_pi::View (&s_XyView, &s_nXySeen))
+				xypad_pi::Want (sidecar_xy_wanted () != 0, sidecar_xy_picking () >= 0);	// (the picker: its names; HOME's Overview and Perform too)
+				xypad_pi::Slow (sidecar_xy_wanted () == 2);	// (Overview's tile alone: a view a second)
+				if (sidecar_xy_wanted () && xypad_pi::View (&s_XyView, &s_nXySeen))
 					sidecar_xy_set (&s_XyView);
 			}
 			if (sidecar_wgview_shown ())		// the machine view: ~10 frames a second, redrawn only on a change
@@ -2895,6 +2942,21 @@ void CKernel::Run (void)
 		if (g_Guard.FatalWhy () != 0) StopAndReboot (g_Guard.FatalWhy ());
 		if (m_pWifi->TakeReboot ()) StopAndReboot ("the Wi-Fi settings (a join, or a failed one's revert)");
 		if (usbnet_pi::TakeReboot ()) StopAndReboot ("the page's reboot onto USB-C (a computer started its USB-C network late)");
+		if (m_bLateAsk)				// a computer's USB network driver came up after the boot chose Wi-Fi / Ethernet
+		{
+			if (m_LatePrompt.step ((unsigned) (CTimer::GetClockTicks64 () / 1000), usbnet_pi::Late () != FALSE, m_pDisplay != 0 && m_pDisplay->HasTouchScreen (), m_pDisplay != 0 ? sidecar_ui_latenet_take () : 0))
+			{
+				if (DrainForRestart ())
+					StopAndReboot ("RESTART on the touchscreen: a computer started its USB-C network after the boot (net=auto: the cable takes the network on the next boot)");
+				else
+				{
+					m_Logger.Write (From, LogWarning, "network: RESTART asked for a computer on USB-C, but the card's work did not settle in %u s: not restarting",
+							pwrbtn::kDrainCapUs / 1000000);
+					m_LatePrompt.drain_failed ();
+				}
+			}
+			if (m_pDisplay != 0) sidecar_ui_latenet (m_LatePrompt.mode ());
+		}
 		if (bridge::take_restart ()) StopAndReboot ("another device's state folder");
 		CSdFiles::TReboot SdReboot = CSdFiles::TakeReboot ();
 		if (SdReboot != CSdFiles::RebootNone) StopAndReboot ("asked on the SD file port", SdReboot == CSdFiles::RebootTry);

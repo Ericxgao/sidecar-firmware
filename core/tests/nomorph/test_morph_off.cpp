@@ -51,7 +51,7 @@ int main() {
   tick();
   CHECK(!ui::remote_page_title() || strcmp(ui::remote_page_title(), "MORPH") != 0);
   CHECK(ui::remote_popups() == shown + 1);
-  CHECK(!strcmp(ui::remote_popup_text(), "MORPH: 0.5.1"));
+  CHECK(!strcmp(ui::remote_popup_text(), "MORPH: 0.5.2"));
   // the scene engine takes no edit and the fader stays; a console / web / learn / QPERF command does nothing
   mod::Tid t = 0;
   CHECK(mod::parse("V1:P1", &t));

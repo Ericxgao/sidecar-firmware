@@ -224,9 +224,21 @@ int remote_param_write(int vi, int machine, int k, int value, int lo = 0);
 // rui1045: on DSP SAMPLE the banked knob is SMP, P11 (remote_track_src_param 10; 0 P1 elsewhere): src14 is its value.
 bool remote_track_write(int t, int k, int value, int lo, int flags);
 // The Rytm's answer to track t's last P(k+1) write: -2 none (nothing written, or an older build), -1 owed, else its
-// status (0 done, 1 busy: try again, 4 locked on the steps held, others refused)
+// status (0 done, 1 refused: SAMPLE EDIT sends it again for a while, 4 locked on the steps held, others refused)
 int remote_track_write_answer(int t, int k);
+// how many answers the Rytm has given to track t's P(k+1) writes (a counter: with the writes sent it says whether the last is answered)
+uint16_t remote_track_write_answers(int t, int k);
 int remote_track_src14(int t);
+// The touchscreen's VOICE knobs: the console's "vparam=T:K:V" (track 0..11, the Rytm's P(K+1), value 0..127; ":0" appended: a
+// drag's live line, written but not followed; returns false for any other line) writes P(K+1) of track T as a knob turn does
+// (remote_track_write: 48) and follows the answer to the final one, which remote_tick polls (status 1, refused, is sent again every
+// 100 ms, at most 10 times within a second, then refused); remote_vparam_failed: bit k set when the last write of P(k + 1) of track t
+// was refused or locked on the steps held (*kind: 1 locked, 2 refused; cleared by the knob's next write), remote_vparam_gen counts
+// the failures (read it first, then the mask: it is published last)
+bool vparam_command(const char* p, char* out, int cap);
+void vparam_tick(uint32_t ms);
+unsigned remote_vparam_failed(int t, int* kind);
+uint32_t remote_vparam_gen();
 // 0.5.0: src14 when the Rytm's 2A said it after the last report of the track's voice (a pick or a turn on an idle
 // voice; on a voice shared with another track of ours on the same machine, whenever known), else -1
 // (the voice's report is the newer word: its own state). SAMPLE EDIT's sample (sedit::open_track).

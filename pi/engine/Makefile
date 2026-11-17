@@ -16,6 +16,9 @@ OBJS = main.o kernel.o platform_pi.o shared.o ob_usb.o ob_follow.o cores.o conso
 OBJS += web_ws.o               # /ws, the WebSocket (web_ws.h, docs/web-ws.md; the portable parts are ws_frame.h, ws_json.h, ws_session.h)
 OBJS += paircode_pi.o          # the pairing code's Pi side (paircode_pi.h; the portable paircode.cpp is in PORT_SRC)
 OBJS += midibridge_pi.o        # the Rytm MIDI bridge (midibridge_pi.h; the portable part is the header midibridge.h)
+OBJS += remote_views_pi.o       # the remote UI's views, built with or without a display (remote_views_pi.h; portable, tested on the Mac)
+OBJS += remote_srv.o remote_pi.o   # the remote UI service over the USB-C cable (remote_pi.h, docs/remote-ui.md; the portable part is remote_srv.cpp)
+OBJS += ../ui/remote/rmt_proto.o ../ui/remote/rmt_views.o ../ui/remote/rmt_sha256.o	# its wire protocol (pi/ui/remote, portable C)
 OBJS += usbnet_pi.o            # the USB-C network (usbnet_pi.h; the portable parts are ncm_ntb.h, dhcpd_lite.h, usbnet_cfg.h)
 OBJS += usbc_pi.o              # the USB-C mode for the SIDECAR MENU > USB-C on the Rytm (usbc_pi.h; the portable part is usb_mode.h)
 OBJS += update_pi.o             # the firmware update from the web page (update_pi.h; the portable part update.cpp is in PORT_SRC)
@@ -56,8 +59,10 @@ endif
 OBJS += ../ui/sidecar_display.o ../ui/sidecar_ui.o ../ui/sidecar_splash.o ../ui/sidecar_wordmark.o
 # the pattern pages (docs/TOUCH-EDITOR.md): the SEQ editor and the Rytm pattern view, LVGL only
 OBJS += ../ui/sidecar_seqed.o ../ui/sidecar_rytmpat.o ../ui/rytm_pattern.o ../ui/sidecar_theme.o ../ui/sidecar_dot.o ../ui/sidecar_dotfont.o
-# the SIDECAR theme's text faces: Space Grotesk Medium, 12..28 px (pi/ui/fonts/gen.sh)
-OBJS += $(patsubst %,../ui/fonts/sidecar_sg%.o,12 14 16 18 20 22 24 28)
+# the SIDECAR and GRID themes' text faces: Arimo Bold, 11..44 px, and the Regular tables that carry the symbols
+# (pi/ui/fonts/gen-arimo.sh)
+OBJS += $(patsubst %,../ui/fonts/sidecar_arb%.o,11 12 14 16 18 19 20 24 30 36 44)
+OBJS += $(patsubst %,../ui/fonts/sidecar_ar%.o,13 18 28)
 # the WAVETABLE / GRANULAR machine view (pi/ui/sidecar_wgview.h), filled by wgview_pi.cpp
 OBJS += ../ui/sidecar_wgview.o
 # the CHOP page (pi/ui/sidecar_chop.h), filled by chopview_pi.cpp

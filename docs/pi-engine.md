@@ -108,7 +108,8 @@ At boot, before the render loops start, every core runs the bench in turn (cores
 | `usbnet=on\|off` | on | the USB-C network function (CDC-NCM) in the CLASS COMPLIANT device; off: the device as in 0.4.2, byte for byte (`docs/usb-network.md`) |
 | `usbip=A.B.C.D` | 172.31.77.1 | the Pi's address on the cable (/24); the computer gets .2 by DHCP (.1 when the Pi is .2). No router, no DNS: the computer's internet stays its own |
 | `usbwait=S` `usbquiet=MS` | 5, 700 | net=auto's wait at boot: no start-of-frame on USB-C within `usbquiet` ms (from the gadget's start, overlapping the Wi-Fi chip's) is no computer; a computer that has not started its USB network driver within `usbwait` s keeps today's network (1..30 s, 100..5000 ms) |
-| `usbtrust=1\|0` | 1 | the USB-C cable is trusted: no pairing code on it (web page, /ws, port 7310). 0 asks for the code there too |
+| `usbtrust=1\|0` | 1 | the USB-C cable is trusted: no pairing code on it (web page, /ws, port 7310, the remote UI's 7340). 0 asks for the code there too |
+| `remote=1\|0` | 1 | the remote UI service (TCP 7340, `docs/remote-ui.md`): served only while the network is the USB-C cable and a display is up; 0 turns it off |
 | `oburbs=1..16` `obblocks=1..8` `obout=paced\|free\|off` `oboutdelay=N` `obctr=zero\|in` | 8, 1, paced, 0, zero | spike2's Overbridge host tuning, unchanged (`docs/pi-circle-spike.md`) |
 
 ## Console (921600 baud, the flasher's serial cable)
