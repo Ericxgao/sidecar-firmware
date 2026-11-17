@@ -13,6 +13,9 @@ namespace voice_pi {
 // ~10 times a second while the VOICE page shows: o from the newest data; pat the newest decoded Rytm pattern (null
 // none), its number. o->gen changes only when something to draw changed. scope false (the web's "voices" topic): no
 // scope and level (the input tap is the display's: reading it here would steal its entries and peaks).
+// Which of the eight knobs take a finger, and the Rytm's P index each writes (Fill's gate, apart for the test): sidecar a Sidecar track,
+// picked a HOME tile's track the Rytm has not selected, mm the machine (machine_of), smpl SAMPLER, vi its voice, label the knobs' labels
+void EditGate(bool sidecar, bool picked, int mm, bool smpl, int vi, const char (*label)[5], unsigned char* wedit, unsigned char* wk);
 void Fill(sidecar_voice_view_t* o, const rytm_pattern_t* pat, int pattern, bool scope = true);
 // A HOME tile's track (0..11) shown on VOICE instead of the Rytm's selected track, until the Rytm selects another one
 // (-1: follow the Rytm). Core 0 (the display's command, voicepick=T).

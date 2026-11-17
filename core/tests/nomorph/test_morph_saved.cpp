@@ -1,5 +1,5 @@
 // core/tests/nomorph/test_morph_saved.cpp - with the scene morph off (SIDECAR_MORPH 0) a project's saved scene and XY data
-// still loads and is written back unchanged (0.5.1 turns the morph on and finds it as it was), and does nothing meanwhile:
+// still loads and is written back unchanged (0.5.2 turns the morph on and finds it as it was), and does nothing meanwhile:
 // a saved MORPH XY slot, a scene with locks and a fader. Built with -DSIDECAR_MORPH=0 (core/Makefile NOMORPH).
 #include <cmath>
 #include <cstdio>
