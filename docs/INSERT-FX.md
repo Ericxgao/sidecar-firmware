@@ -102,7 +102,13 @@ read as the same WIDTH whatever came before [tested, `test_insert`]. The shelves
   is connected, so a lost message or a turn that crossed one of ours leaves the Rytm's knobs off for 2 s at most.
 - **Saving**: a turn writes the bus's post EQ, which marks the kit file dirty; the file is written once, 1 s after the
   last change (`idle_save`), not per message.
-- **Touchscreen**: Settings > Send FX shows each FX's BASE and WIDTH as dials (read only).
+- **Touchscreen**: Settings > Send FX shows each FX's BASE and WIDTH as dials (read only: the Rytm owns them).
+  The INSERT FX page itself takes a finger: the eight dials (a vertical drag: up is more; five touch sizes of drag are the
+  whole range), the three send bars and OUT's LEV / PAN / WID (while the route is PRE or POST; a drag along the bar) change relative to
+  where the finger landed, from the value as set (not as it plays: an LFO or a lock does not move the start), a double tap sets the
+  default (the TYPE's, a send 0, LEV 100, PAN 64, WID 64). They send an encoder turn's lines (`ins=Vn:S:pK:V`, `ins=Vn:send:B:V`,
+  `out=Vn:lev|pan|wid:V`), at most one every 30 ms while dragging and always the value at the lift; the dial shows the finger's value
+  while down and 300 ms after, then the engine's. A dial with no TYPE set takes no touch.
 - **Web**: the old page's Send FX tab, and web-next's bus 1 / 2 strip: BASE and WIDTH sliders / knobs (`/status`
   `"ins"` bus chains carry `"bw":[base,width]`).
 - **Console**: `ins=B1:eq:base:40`, `ins=B2:eq:width:60`; `ins` shows `(BASE b WIDTH w)` on bus 1 / 2's eq line.

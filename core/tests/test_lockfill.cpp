@@ -981,7 +981,7 @@ int main() {
     // 49 1 1 15: GENERATOR, a popup only
     ui::fill_page_reset();
     send(msg(0x49, {1, ui::kPageGenerator}));
-    CHECK(!ui::fill_page_view().on && !strcmp(ui::remote_popup_text(), "GENERATOR: 0.5.1"));   // L3: its text
+    CHECK(!ui::fill_page_view().on && !strcmp(ui::remote_popup_text(), "GENERATOR: 0.5.2"));   // L3: its text
     // the console: open on BD, ENGINE first (UP, the first .. last engine), VELOCITY 60..127 RND; a fresh seed
     cmd("fill=open:0");
     auto v = ui::fill_page_view();

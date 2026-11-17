@@ -147,7 +147,7 @@ $(SMALL)/test_%: tests/small/test_%.cpp $(SMALL_CORE_OBJ) $(DEPS_H) $(B)/libengi
 	$(CXX) $(CXXFLAGS) $(SMALL_FLAGS) -Itests -o $@ $< $(SMALL_CORE_OBJ) $(B)/libengines.a
 
 # The 0.5.0 shipping configuration of the scene morph (SIDECAR_MORPH 0, core/sidecar_features.h): the tests above run with
-# the morph ON (their engine is still built and kept for 0.5.1); tests/nomorph runs the core with it off
+# the morph ON (their engine is still built and kept for 0.5.2); tests/nomorph runs the core with it off
 NOMORPH       := $(B)/nomorph
 NOMORPH_FLAGS := -USIDECAR_MORPH -DSIDECAR_MORPH=0
 NOMORPH_TESTS := $(patsubst tests/nomorph/%.cpp,$(NOMORPH)/%,$(wildcard tests/nomorph/test_*.cpp))

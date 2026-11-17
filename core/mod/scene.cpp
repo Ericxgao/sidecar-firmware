@@ -412,7 +412,7 @@ CORE_COLD bool command(const char* p, char* o, int cap) {
   if (cap <= 0) return true;
   o[0] = 0;
   if (!p[5]) return state_line(o, cap), true;
-  if (!SIDECAR_MORPH) return sniprintf(o, cap, CORE_STR("scene: not in this version (0.5.1)")), true;   // (the state line above is read only)
+  if (!SIDECAR_MORPH) return sniprintf(o, cap, CORE_STR("scene: not in this version (0.5.2)")), true;   // (the state line above is read only)
   const char* q = p + 6;
   char k[8], a[8], b[12], c[12];
   bool ok = field(&q, k, sizeof k);

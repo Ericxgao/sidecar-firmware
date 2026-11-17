@@ -15,6 +15,7 @@
 #include "notes.h"
 #include "paircode_pi.h"
 #include "usbc_pi.h"
+#include "xypad_pi.h"
 #include "sendfx_pi.h"
 #include "masterfx_pi.h"
 #include "rec_pi.h"
@@ -669,7 +670,7 @@ void CEngineCores::Command (const char *p)
 	}
 	else if (char Sc[400]; bridge::scene_command (p, Sc, sizeof Sc))	// scene, scene=...: the morph scenes (core/mod/scene.h)
 	{
-		L->Write (From, LogNotice, "%s", Sc);
+		if (!xypad_pi::Quiet (p)) L->Write (From, LogNotice, "%s", Sc);	// (scene=fader: a drag's lines)
 	}
 	else if (char Xy[400]; bridge::xy_command (p, Xy, sizeof Xy))	// xy, xy=...: the XY pad (core/mod/xypad.h)
 	{
@@ -705,7 +706,7 @@ void CEngineCores::Command (const char *p)
 	}
 	else if (char Po[480]; bridge::poly_command (p, Po, sizeof Po))	// poly: poly FM's notes and live chords (core/poly.h)
 	{
-		L->Write (From, LogNotice, "%s", Po);
+		if (!xypad_pi::Quiet (p)) L->Write (From, LogNotice, "%s", Po);	// (a touch drag's value lines answer too: 30 a second, not logged)
 	}
 #if SIDECAR_SEQED
 	else if (char Sq[160]; seqed_pi::Command (p, Sq, sizeof Sq))	// seqed=...: the display's pattern edits (docs/TOUCH-EDITOR.md)

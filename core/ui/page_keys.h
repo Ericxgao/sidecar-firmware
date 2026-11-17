@@ -81,7 +81,7 @@ static const sc_page_key_t sc_rytm_mk2_pages[] = {
 #if SIDECAR_MORPH
 	{14, "MORPH", "MORPH", ""},	/* 0.5.0 (spec-050 2.6): needs the 0.5.0 flash's 0026 (UP + T14: rui.c forwards
 					   UP + T1..T13 today); until then the SIDECAR MENU's row */
-#endif	/* 0.5.0: the MORPH page is off (SIDECAR_MORPH 0): UP + T14, which the rc5b mod still forwards, finds no row (remote.cpp shows a "MORPH: 0.5.1" popup) */
+#endif	/* 0.5.0: the MORPH page is off (SIDECAR_MORPH 0): UP + T14, which the rc5b mod still forwards, finds no row (remote.cpp shows a "MORPH: 0.5.2" popup) */
 };
 static const sc_combo_t sc_rytm_mk2_combos[] = {
 	{"pages", "UP+YES", "SIDECAR (YES: MENU)", "YES PAGES", 0, 0},
@@ -94,7 +94,7 @@ static const sc_combo_t sc_rytm_mk2_combos[] = {
 	/* 0.5.0 FILL: the 0.5.0 0026 sends UP + RIGHT / LEFT as 49 1 1 16 / 15 (hello caps2 bit 0, the host's claim 4A 7E 1;
 	   remote.h kPageFill). Not on UP's map: both maps are full (18 rows) */
 	{"fill", "UP+RIGHT", "FILL (TRACK LOCKS)", 0, 0, "FILL"},
-	{"gen", "UP+LEFT", "GENERATOR (0.5.1)", 0, 0, 0},
+	{"gen", "UP+LEFT", "GENERATOR (0.5.2)", 0, 0, 0},
 	{"copy", "T+UP+REC", "COPY STEPS (SEQ)", 0, "T+FUNC+REC", 0, "T+REC COPY"},
 	{"paste", "T+UP+STOP", "PASTE STEPS", 0, "T+FUNC+STOP", 0, "T+STOP PASTE"},
 	{"clear", "T+UP+PLAY", "CLEAR STEPS", 0, "T+FUNC+PLAY", 0, "T+PLAY CLEAR"},

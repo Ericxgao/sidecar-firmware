@@ -480,6 +480,7 @@ struct State {
   // report (remote_track_src14_fresh): one count of both
   uint32_t src14_at[12] = {}, rep_at[8] = {}, at_n = 0;
   int16_t wr_pat[12] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};   // P1 our 48 wrote, its answer owed (presetpick)
+  uint16_t wr_cnt[12][16] = {};  // the Rytm's 48 answers received (vparam follows only the last write's)
   uint8_t wr_ans[12][16] = {};   // remote_track_write's answers: 0 none, 1 owed, 2 + the Rytm's status
   uint16_t src_known[12] = {};
   // rc5 (page-2 defaults): the Rytm's machine list on top (2B), each track's voice byte when it opened, the tracks a
@@ -1947,15 +1948,15 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         return;
       }
       if (!SIDECAR_MORPH && b[0] == 1 && n >= 2 && b[1] == 14) {   // UP + T14 (the rc5b mod still forwards it): the MORPH page is off
-        remote_popup("MORPH: 0.5.1");
+        remote_popup("MORPH: 0.5.2");
         return;
       }
       if (b[0] == 1 && n >= 2 && (b[1] == kPageFill || b[1] == kPageGenerator)) {   // 0.5.0: UP + RIGHT / LEFT
 #if CORE_POLY
         if (b[1] == kPageFill) fill_page_open(-1);
-        else remote_popup("GENERATOR: 0.5.1");   // (the pattern generator comes in 0.5.1: the key is bound already)
+        else remote_popup("GENERATOR: 0.5.2");   // (the pattern generator comes in 0.5.2: the key is bound already)
 #else
-        remote_popup(b[1] == kPageFill ? "FILL: NOT HERE" : "GENERATOR: 0.5.1");
+        remote_popup(b[1] == kPageFill ? "FILL: NOT HERE" : "GENERATOR: 0.5.2");
 #endif
         return;
       }
@@ -2011,7 +2012,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       if (n < 3) break;
       if (b[0] < 12 && b[1] >= 8 && b[1] < 16 && (s.p2_due >> b[0] & 1) && s.p2_stage[b[0]])   // rc5: page 2's answered
         s.p2_ans[b[0]] &= (uint8_t)~(1u << (b[1] - 8));
-      if (b[0] < 12 && b[1] < 16) s.wr_ans[b[0]][b[1]] = (uint8_t)(2 + b[2]);
+      if (b[0] < 12 && b[1] < 16) s.wr_ans[b[0]][b[1]] = (uint8_t)(2 + b[2]), ++s.wr_cnt[b[0]][b[1]];
       if (b[2] == 4) core::log("rui: 48 write track %d P%d locked on the steps held", b[0] + 1, b[1] + 1);   // (1038)
       else if (b[2]) core::log("rui: 48 write track %d P%d refused (status %d)", b[0] + 1, b[1] + 1, b[2]);
       if (b[0] < 12 && b[1] == 0 && s.wr_pat[b[0]] >= 0) {   // presetpick: PAT written into a JUNO track's sound (not a
@@ -2143,6 +2144,7 @@ CORE_COLD void remote_tick(uint32_t ms) {
     }
   }
   s.now_ms = ms;
+  vparam_tick(ms);   // the touchscreen's VOICE knob writes' answers (a few compares when none is followed)
   if (s.rep_code >= 0) key_repeat_tick(ms);
   page_two_tick(ms);   // rc5: a machine list choice's page-2 defaults
 #if CORE_POLY && CORE_MSAMP
@@ -2499,11 +2501,111 @@ CORE_COLD bool remote_track_write(int t, int k, int value, int lo, int flags) {
   s.wr_ans[t][b[1]] = 1;
   return true;
 }
+CORE_COLD uint16_t remote_track_write_answers(int t, int k) { return t >= 0 && t < 12 && k >= 0 && k < 16 ? s.wr_cnt[t][k] : 0; }
 CORE_COLD int remote_track_write_answer(int t, int k) {
   if (t < 0 || t >= 12 || k < 0 || k >= 16) return -2;
   const int a = s.wr_ans[t][k];
   return a == 0 ? -2 : a == 1 ? -1 : a - 2;
 }
+// ---- the touchscreen's VOICE knobs (vparam=T:K:V[:0]): a drag's values written to the Rytm as a knob turn writes them
+// (remote_track_write: 48). The Rytm answers 48 with 0 written, 1 refused (shared SRC / page 2 records not set up for the machine),
+// 2 no such parameter, 3 lock slots full, 4 locked on the steps held; there is no "busy". A full write queue on the Rytm drops a
+// write with no answer, and builds without 48 never answer. Only the final value of a drag is followed (the line without ":0",
+// sent at the lift): an answer to an earlier write of the knob must not clear it, so the answers are counted
+// (remote_track_write_answers) and the last one's status is read once every write sent has been answered. Status 1 is sent again
+// every kVpRetryMs, at most kVpRetries times within kVpRefusedMs of the first one (a new gesture's final line starts again),
+// then it is refused; 3, 4 and 2 are refused at once (4 as "locked") and kept for the page (remote_vparam_failed: it puts the
+// knob back and says so); no answer for kVpOweMs is nothing to follow. A new write of a knob forgets its earlier failure.
+namespace {
+struct VParam {
+  uint16_t mask = 0;                    // the knobs (bit k: P(k + 1)) whose final write is followed
+  uint8_t v[16] = {}, retries[16] = {};
+  uint16_t sent[16] = {}, got0[16] = {};   // writes sent (live ones too) since the last time none was owed; the answer count then
+  uint32_t t0[16] = {}, first1[16] = {}, next[16] = {};
+};
+VParam g_vp[12];
+volatile uint16_t g_vp_failed[12];      // bit k: the last write of P(k + 1) was refused or locked
+volatile uint8_t g_vp_kind[12];         // 1 locked on the steps held, 2 refused (the last failure's)
+uint32_t g_vp_gen = 0;                  // written last (release), read first (acquire): core 3 -> the display's core 0
+constexpr uint32_t kVpRetryMs = 100, kVpRefusedMs = 1000, kVpOweMs = 1500;
+constexpr int kVpRetries = 10;
+void vp_fail(int t, int k, int kind) {
+  g_vp_failed[t] = (uint16_t)(g_vp_failed[t] | (1u << k));
+  g_vp_kind[t] = (uint8_t)kind;
+  __atomic_store_n(&g_vp_gen, g_vp_gen + 1, __ATOMIC_RELEASE);
+}
+uint16_t vp_owed(int t, int k) {   // (an answer nobody asked for, a stray one, owes nothing)
+  const int16_t d = (int16_t)(g_vp[t].sent[k] - (uint16_t)(remote_track_write_answers(t, k) - g_vp[t].got0[k]));
+  return d > 0 ? (uint16_t)d : 0;
+}
+bool vp_send(int t, int k, int v) {
+  VParam& w = g_vp[t];
+  if (!vp_owed(t, k)) w.got0[k] = remote_track_write_answers(t, k), w.sent[k] = 0;   // nothing owed: count from here
+  if (!remote_track_write(t, k, v, 0, 0)) return false;
+  ++w.sent[k];
+  return true;
+}
+}  // namespace
+
+CORE_COLD bool vparam_command(const char* p, char* o, int cap) {
+  if (strncmp(p, "vparam", 6) != 0 || (p[6] && p[6] != '=')) return false;
+  static const char kHelp[] = "vparam=T:K:V[:0] (track 0..11, the Rytm's P(K+1) with K 0..15, value 0..127; :0 a drag's live line, not followed: the touchscreen's VOICE knobs)";
+  int a[3] = {-1, -1, -1};
+  bool live = false;
+  const char* q = p[6] ? p + 7 : p + 6;
+  for (int i = 0; i < 3; ++i) {
+    int n = 0, v = 0;
+    for (; q[n] >= '0' && q[n] <= '9' && n < 4; ++n) v = v * 10 + (q[n] - '0');
+    const bool tail = i < 2 || (q[n] == ':' && q[n + 1] == '0' && !q[n + 2]);
+    if (!n || (i < 2 ? q[n] != ':' : q[n] != 0 && !tail)) return sniprintf(o, cap, "%s", kHelp), true;
+    if (i == 2 && q[n]) live = true;
+    a[i] = v, q += n + (i < 2 ? 1 : 0);
+  }
+  const int t = a[0], k = a[1], v = a[2];
+  if (t > 11 || k > 15 || v > 127) return sniprintf(o, cap, "%s", kHelp), true;
+  g_vp_failed[t] = (uint16_t)(g_vp_failed[t] & ~(1u << k));
+  VParam& w = g_vp[t];
+  if (!vp_send(t, k, v)) {   // not a Sidecar machine: nothing sent, the page puts the knob back
+    w.mask = (uint16_t)(w.mask & ~(1u << k));
+    vp_fail(t, k, 2);
+    return sniprintf(o, cap, "vparam: track %d is not a Sidecar machine", t + 1), true;
+  }
+  if (!live) {
+    w.mask = (uint16_t)(w.mask | (1u << k)), w.v[k] = (uint8_t)v, w.t0[k] = s.now_ms, w.first1[k] = 0, w.retries[k] = 0;
+    w.next[k] = s.now_ms + kVpRetryMs;
+  }
+  return sniprintf(o, cap, "vparam: track %d P%d = %d%s", t + 1, k + 1, v, live ? " (live)" : ""), true;
+}
+
+CORE_COLD void vparam_tick(uint32_t ms) {
+  for (int t = 0; t < 12; ++t) {
+    VParam& w = g_vp[t];
+    if (!w.mask) continue;
+    for (int k = 0; k < 16; ++k) {
+      if (!(w.mask >> k & 1)) continue;
+      if (vp_owed(t, k)) {   // writes still unanswered (an earlier one's answer is not the last's)
+        if (ms - w.t0[k] >= kVpOweMs) w.mask = (uint16_t)(w.mask & ~(1u << k)), w.got0[k] = (uint16_t)(remote_track_write_answers(t, k) - w.sent[k]);   // dropped, or no 48: nothing to follow
+        continue;
+      }
+      const int a = remote_track_write_answer(t, k);
+      if (a == 1) {   // refused: again, a few times
+        if (!w.first1[k]) w.first1[k] = ms ? ms : 1;
+        if (w.retries[k] >= kVpRetries || ms - w.first1[k] >= kVpRefusedMs) w.mask = (uint16_t)(w.mask & ~(1u << k)), vp_fail(t, k, 2);
+        else if ((int32_t)(ms - w.next[k]) >= 0) vp_send(t, k, w.v[k]), ++w.retries[k], w.next[k] = ms + kVpRetryMs, w.t0[k] = ms;
+      } else {
+        w.mask = (uint16_t)(w.mask & ~(1u << k));   // written (0), none (-2), locked (4) or another refusal
+        if (a > 0) vp_fail(t, k, a == 4 ? 1 : 2);
+      }
+    }
+  }
+}
+CORE_COLD unsigned remote_vparam_failed(int t, int* kind) {
+  if (t < 0 || t >= 12) return 0;
+  if (kind) *kind = g_vp_kind[t];
+  return g_vp_failed[t];
+}
+CORE_COLD uint32_t remote_vparam_gen() { return __atomic_load_n(&g_vp_gen, __ATOMIC_ACQUIRE); }
+
 CORE_COLD int remote_track_src14(int t) { return t >= 0 && t < 12 ? s.src14[t] : -1; }
 CORE_COLD int remote_track_src14_fresh(int t) {
   if (t < 0 || t >= 12 || s.src14[t] < 0) return -1;
@@ -2534,6 +2636,8 @@ CORE_COLD bool remote_key_repeating() { return s.rep_code >= 0; }
 
 CORE_COLD void remote_reset() {
   s = State();
+  for (auto& w : g_vp) w = VParam();
+  for (int t = 0; t < 12; ++t) g_vp_failed[t] = 0, g_vp_kind[t] = 0;
   detent_reset();
   memset(reported, 0, sizeof reported);
   memset(track_smpl, 0, sizeof track_smpl);
