@@ -4,6 +4,9 @@ import { collectBlackbox, fileName, readBlackboxFile } from "./blackbox";
 import { maskSecrets } from "./prevboot";
 
 const enc = new TextEncoder();
+// what the engine really sends to an unpaired client (web.cpp PairRefused): HTTP 200, a JSON body, X-Sidecar-Pair
+const refusal = () => new Response('{"ok":false,"code":401,"pair":true,"wait":0,"error":"not paired"}', { headers: { "Content-Type": "application/json", "X-Sidecar-Pair": "required" } });
+const refusalBodyOnly = () => new Response('{"ok":false,"code":401,"pair":true,"wait":0,"error":"not paired"}');
 
 // a fake /blackbox: files by name; every reply is "SIZE FROM\n" + up to `chunk` bytes from `off`
 function fake(files: Record<string, string | null>, opt: { chunk?: number; fail?: (n: number) => number | null; onReq?: (url: string, n: number) => void } = {}) {
@@ -56,6 +59,12 @@ describe("reading one black box file", () => {
   it("tells to pair on 401 and 403", async () => {
     for (const s of [401, 403]) expect(await readBlackboxFile(fake({}, { fail: () => s }).api, false)).toMatchObject({ kind: "error", text: expect.stringMatching(/Pair this device/) });
   });
+  it("tells to pair on the engine's real refusal (HTTP 200 + JSON + X-Sidecar-Pair, or the JSON alone)", async () => {
+    for (const mk of [refusal, refusalBodyOnly]) {
+      const api = new Api({ token: () => "t", fetchFn: (async () => mk()) as unknown as typeof fetch });
+      expect(await readBlackboxFile(api, false)).toMatchObject({ kind: "error", text: expect.stringMatching(/Pair this device/) });
+    }
+  });
   it("gives a clear error when a chunk fails, saying how far it got", async () => {
     const f = fake({ new: "x".repeat(40) }, { chunk: 10, fail: (n) => (n === 3 ? 500 : null) });
     const r = await readBlackboxFile(f.api, false);
@@ -99,7 +108,7 @@ describe("reading one black box file", () => {
       return new Response(new Blob([enc.encode(`5 5\n`)]));   // rotated: tiny new file, offset clamped
     }) as unknown as typeof fetch;
     const r = await readBlackboxFile(new Api({ token: () => "t", fetchFn }), false);
-    expect(r).toMatchObject({ kind: "ok", text: expect.stringMatching(/^z{10}\n\[the file was rotated/) });
+    expect(r).toMatchObject({ kind: "ok", text: expect.stringMatching(/^z{10}\n\[rotated while read; later lines are missing/) });
   });
   it("refuses a reply without the SIZE FROM line", async () => {
     const f = (async () => new Response("<html>")) as unknown as typeof fetch;
@@ -134,6 +143,10 @@ describe("the download", () => {
     const r = await collectBlackbox(f.api, { version: "0.5.1", now });
     expect(r).toMatchObject({ kind: "ok", text: expect.stringContaining("only\n") });
     if (r.kind === "ok") expect(r.text).toMatch(/blackbox\.1\.log: none/);
+  });
+  it("fails as a whole on the real refusal", async () => {
+    const api = new Api({ token: () => "t", fetchFn: (async () => refusal()) as unknown as typeof fetch });
+    expect(await collectBlackbox(api, { version: "0.5.1", now })).toMatchObject({ kind: "error", text: expect.stringMatching(/Pair this device/) });
   });
   it("fails as a whole when pairing is missing", async () => {
     const f = fake({}, { fail: (n) => (n >= 1 ? 401 : null) });

@@ -5,12 +5,11 @@
 // meanwhile (the offset comes back smaller than asked) is cut with a note, and a reply that does not advance ends the
 // download with an error, so no case loops. The joined text goes through maskSecrets (prevboot.ts) before it is offered.
 import type { Api } from "./api";
-import { loadPrevBoot, maskSecrets } from "./prevboot";
+import { PAIR_FIRST as PAIR, loadPrevBoot, maskSecrets, pairRefused } from "./prevboot";
 
 export type BlackboxPart = { kind: "ok"; text: string; bytes: number } | { kind: "none" } | { kind: "error"; text: string };
 export type Collected = { kind: "ok"; text: string; name: string; bytes: number } | { kind: "error"; text: string };
 
-const PAIR = "Pair this device first (Settings › Access).";
 const MAX_CHUNKS = 2000; // 2000 x 64 KB: far above the rotation size, so only a file that never stops growing reaches it
 
 export async function readBlackboxFile(
@@ -19,7 +18,7 @@ export async function readBlackboxFile(
   onProgress?: (done: number, size: number) => void,
   maxChunks = MAX_CHUNKS,
 ): Promise<BlackboxPart> {
-  const parts: Uint8Array[] = [];
+  let all = new Uint8Array(0); // filled as the chunks come (no list of pieces to join at the end)
   let off = 0;
   let size = 0;
   let note = "";
@@ -30,17 +29,23 @@ export async function readBlackboxFile(
       if (r.status === 401 || r.status === 403) return { kind: "error", text: PAIR };
       if (!r.ok) return { kind: "error", text: `The Sidecar answered ${r.status}${size ? ` after ${off} of ${size} bytes` : ""}.` };
       const buf = new Uint8Array(await r.arrayBuffer());
+      if (pairRefused(r, new TextDecoder().decode(buf.subarray(0, 64)))) return { kind: "error", text: PAIR };
       const nl = buf.subarray(0, 64).indexOf(10);
       const m = nl > 0 ? /^(\d+) (\d+)$/.exec(new TextDecoder().decode(buf.subarray(0, nl))) : null;
       if (!m) return { kind: "error", text: "The Sidecar's answer was not a black box chunk." };
       size = Number(m[1]);
       const from = Number(m[2]);
       if (from !== off) {
-        note = "\n[the file was rotated while it was read; the rest is in the next file]\n";
+        note = "\n[rotated while read; later lines are missing]\n";
         break;
       }
       const body = buf.subarray(nl + 1);
-      if (body.length) parts.push(body);
+      if (off + body.length > all.length) {
+        const bigger = new Uint8Array(Math.max(size, off + body.length));
+        bigger.set(all.subarray(0, off));
+        all = bigger;
+      }
+      all.set(body, off);
       off += body.length;
       onProgress?.(Math.min(off, size), size);
       if (off >= size) break;
@@ -54,10 +59,7 @@ export async function readBlackboxFile(
     return { kind: "error", text: (e as Error).message };
   }
   if (!off && !note) return { kind: "none" };
-  const all = new Uint8Array(off);
-  let p = 0;
-  for (const b of parts) { all.set(b, p); p += b.length; }
-  const text = new TextDecoder().decode(all) + note;
+  const text = new TextDecoder().decode(all.subarray(0, off)) + note;
   return { kind: "ok", text, bytes: off };
 }
 
