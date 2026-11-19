@@ -1311,12 +1311,29 @@ int main() {
       ui::kFillPage.draw(c, 0, 1, t + 40000);
       CHECK(strcmp(c.txt[ui::kSlotFoot].s, "UNDONE") != 0);
     }
+    // the Rytm repeating its report of the SAME project (10, again and again) is no project load: the undo stays
+    writer_reset(r);
+    cmd("fill=open:0");
+    project_switch_named("SAME", "SAME", false);
+    cmd("fill=yes");
+    pump(400);
+    CHECK(ui::fill_page_view().undo);
+    {
+      std::vector<uint8_t> same = {0xF0, 0x7D, 0x52, 0x54, 0x10};   // (the project as it is now)
+      for (const char* c = project; *c; ++c) same.push_back((uint8_t)*c);
+      same.push_back(0xF7);
+      send(same), send(same);
+    }
+    cmd("fill=undo");
+    pump(400);
+    CHECK(!strcmp(ui::fill_page_view().note, "UNDONE"));
     // a project load (the Rytm's 10, the same pattern number): expired
     writer_reset(r);
     cmd("fill=open:0");
     cmd("fill=yes");
     pump(400);
     CHECK(ui::fill_page_view().undo);
+    project_switch_named("OTHER", "OTHER", false);   // (another project: its key moves; the 10 below is held in the test card's mode)
     send({0xF0, 0x7D, 0x52, 0x54, 0x10, 'O', 'T', 'H', 'E', 'R', 0xF7});
     cmd("fill=undo");
     CHECK(!strcmp(ui::fill_page_view().note, "UNDO EXPIRED (PROJECT)"));
@@ -1376,6 +1393,7 @@ int main() {
       F.answer = false;
       cmd("fill=undo");
       CHECK(patwrite::busy());
+      project_switch_named("PROJ2", "PROJ2", false);
       send({0xF0, 0x7D, 0x52, 0x54, 0x10, 'P', 'R', 'O', 'J', '2', 0xF7});
       F.answer = true;
       pump(3000);

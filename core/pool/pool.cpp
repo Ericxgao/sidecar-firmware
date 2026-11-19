@@ -481,6 +481,11 @@ CORE_COLD static void announce() {   // the Rytm's tables for the project (its f
 
 static uint32_t g_project_gen = 0;
 uint32_t project_gen() { return g_project_gen; }
+CORE_COLD uint32_t project_id() {
+  uint32_t h = 2166136261u;   // FNV-1a over the key
+  for (const char* c = project; *c; ++c) h = (h ^ (uint8_t)*c) * 16777619u;
+  return h;
+}
 
 CORE_COLD void set_project(const uint8_t* d, int len) {
   ++g_project_gen;

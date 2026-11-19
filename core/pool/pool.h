@@ -73,6 +73,9 @@ void set_project(const uint8_t* d, int len);   // 10's name bytes (up to F7)
 // 0.5.0 FILL (core/ui/page_fill.cpp): counts the Rytm's project loads (every 10, every slot switch): an undo made
 // before one is gone (the working pattern may be another project's now, under the same pattern number)
 uint32_t project_gen();
+// Which project is the Rytm's: a hash of the project's key (`project`). Unlike project_gen() it does not move on a repeated report of
+// the same project (the Rytm may repeat its 10 / hello / slot report): use it to tell "another project" from "the same one again".
+uint32_t project_id();
 void project_switch(const char* name);         // the switch a 10 asked for once core/bundle/rename.h has its answer
 void project_switch_named(const char* key, const char* name, bool reload);   // core/bundle/prjslot.h's switch
 void project_load();
