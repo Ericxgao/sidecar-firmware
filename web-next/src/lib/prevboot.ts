@@ -6,8 +6,17 @@ import type { Api } from "./api";
 
 export type PrevBoot = { kind: "ok"; text: string; bytes: number } | { kind: "none" } | { kind: "error"; text: string };
 
+// Also masked, in case a log line ever carries one (the engine does not log them: wifi.cpp, console.cpp): Wi-Fi keys and
+// joins (psk= passphrase= password= join:SSID:PASS), pairing tokens (64 hex after token / X-Sidecar-Auth), and the name a
+// device gave when it paired (the client's own text). Checksums and other long hex or digit runs stay.
 export const maskSecrets = (t: string) =>
-  t.replace(/(paircode\s*[=:]\s*)\d{4,}/gi, "$1********").replace(/(pairing code[^\n\d]{0,40})(?:\d{6,}|\d{4}[ -]?\d{4})/gi, "$1********");
+  t
+    .replace(/(paircode\s*[=:]\s*)\d{4,}/gi, "$1********")
+    .replace(/(pairing code[^\n\d]{0,40})(?:\d{6,}|\d{4}[ -]?\d{4})/gi, "$1********")
+    .replace(/\b(psk|passphrase|password|passwd)(\s*[=:]\s*)"?[^\s"]+"?/gi, "$1$2********")
+    .replace(/(join:)\S+/gi, "$1********")
+    .replace(/((?:token|x-sidecar-auth)\s*[=:]\s*)[0-9a-f]{32,}/gi, "$1********")
+    .replace(/(paired with the code \(")[^\n]*?("\))/g, "$1********$2");
 
 export async function loadPrevBoot(api: Pick<Api, "request">): Promise<PrevBoot> {
   try {
