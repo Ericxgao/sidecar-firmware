@@ -1327,6 +1327,32 @@ int main() {
     cmd("fill=undo");
     pump(400);
     CHECK(!strcmp(ui::fill_page_view().note, "UNDONE"));
+    // the Rytm naming ANOTHER project while its switch is held back (the test card is keyed by slot, no 4B yet: set_project returns
+    // early): the undo is gone, a job running ends, all the same; a project reloaded under its own key too
+    writer_reset(r);
+    cmd("fill=open:0");
+    project_switch_named("HELD", "HELD", false);
+    cmd("fill=yes");
+    pump(400);
+    CHECK(ui::fill_page_view().undo);
+    send({0xF0, 0x7D, 0x52, 0x54, 0x10, 'H', 'E', 'L', 'D', '2', 0xF7});
+    CHECK(!strcmp(project, "HELD"));   // (held: the project is still the old one)
+    cmd("fill=undo");
+    CHECK(!strcmp(ui::fill_page_view().note, "UNDO EXPIRED (PROJECT)"));
+    writer_reset(r);
+    CHECK(patwrite::start(patch_set, nullptr));
+    send({0xF0, 0x7D, 0x52, 0x54, 0x10, 'H', 'E', 'L', 'D', '3', 0xF7});   // (before the answer is taken)
+    pump(400);
+    CHECK(patwrite::why() == patwrite::kWhyProject && F.writes == 0);
+    writer_reset(r);
+    cmd("fill=open:0");
+    project_switch_named("RELOAD", "RELOAD", false);
+    cmd("fill=yes");
+    pump(400);
+    CHECK(ui::fill_page_view().undo);
+    project_switch_named("RELOAD", "RELOAD", true);   // (a cleared slot loaded again, a restore: the same key)
+    cmd("fill=undo");
+    CHECK(!strcmp(ui::fill_page_view().note, "UNDO EXPIRED (PROJECT)"));
     // a project load (the Rytm's 10, the same pattern number): expired
     writer_reset(r);
     cmd("fill=open:0");
