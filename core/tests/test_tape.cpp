@@ -191,6 +191,32 @@ int main() {
     float last = (float)std::sqrt(e / 48000);
     CHECK(ok && peak < 2.0f && last > 0.02f);   // still sounding after 20 s: self-oscillation
   }
+  {   // F8: a runaway never starts from nothing: RPT 127, zero input from reset (no burst ever), 20 s -> still silent
+    for (int mode : {0, 5, 7}) {
+      Rig g;
+      g.k[0] = 10, g.k[1] = 127, g.k[2] = (uint8_t)(16 * mode), g.k[3] = 64;
+      g.run(20 * 48000, nullptr);
+      float peak = 0;
+      for (size_t i = 0; i < g.l.size(); ++i) peak = std::fmax(peak, std::fabs(g.l[i]) + std::fabs(g.r[i]));
+      printf("test_tape: silent runaway mode %d peak %g\n", mode, (double)peak);
+      CHECK(peak < 1e-4f);
+    }
+  }
+  {   // ... and through SendFx with every send at 0 and loud stems
+    auto fx = std::make_unique<SendFx>(kSr);
+    memset((void*)&control, 0, sizeof control);
+    control.knob[0][0] = kTape, control.knob[0][2] = 10, control.knob[0][3] = 127, control.knob[0][4] = 80, control.knob[0][5] = 64;
+    float st[12][kStems], o[12][2], m = 0;
+    for (int b = 0; b < 20 * 4000; ++b) {
+      for (int j = 0; j < 12; ++j)
+        for (int v = 0; v < kStems; ++v) st[j][v] = 0.3f * (float)((b + j + v) % 7 - 3) / 3.0f;   // loud, sends 0
+      fx->Process(st, 12, o, control);
+      if (b > 18 * 4000)
+        for (int j = 0; j < 12; ++j) m = std::fmax(m, std::fabs(o[j][0]) + std::fabs(o[j][1]));
+    }
+    printf("test_tape: silent runaway SendFx peak %g\n", (double)m);
+    CHECK(m < 1e-4f);
+  }
   {   // the dub siren: an H1 runaway with TIME swept hard (each pass pitched) keeps howling, and holds when TIME rests
     Rig g;
     g.k[0] = 30, g.k[1] = 120, g.k[2] = 0, g.k[3] = 80;
