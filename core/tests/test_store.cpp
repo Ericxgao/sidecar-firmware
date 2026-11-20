@@ -693,6 +693,40 @@ static void want_is_not_quadratic() {
   clear();
 }
 
+// store.cpp's want table (FNV-1a over the path, 4096 slots, linear probing): paths that land in the same slot, and ones that
+// probe past the end of the table back to its start, are all kept once and none is taken for a repeat of another
+static uint32_t want_slot(const std::string& p) {
+  uint32_t h = 2166136261u;
+  for (unsigned char c : p) h = (h ^ c) * 16777619u;
+  return h & 4095;
+}
+static void want_survives_hash_collisions() {
+  const uint8_t* d = nullptr;
+  uint32_t n = 0;
+  clear();
+  cardq::reset();
+  cardq::set_worker(true);
+  std::vector<std::string> same, last;   // three in one slot, three in the last slot (the third and later wrap to slot 0, 1)
+  for (int i = 0; i < 4000000 && (same.size() < 3 || last.size() < 3); ++i) {
+    char p[64];
+    sniprintf(p, sizeof p, "/.rytm/seq/HC/p%07d.sqp", i);
+    uint32_t s = want_slot(p);
+    if (s == 1234 && same.size() < 3) same.push_back(p);
+    if (s == 4095 && last.size() < 3) last.push_back(p);
+  }
+  CHECK(same.size() == 3 && last.size() == 3);
+  for (int round = 0; round < 2; ++round)   // the second round: every one a repeat
+    for (auto* v : {&same, &last})
+      for (const std::string& p : *v) want(p.c_str());
+  fill_begin();
+  CHECK(run_fill());
+  CHECK(entries() == 6);
+  for (auto* v : {&same, &last})
+    for (const std::string& p : *v) CHECK(get(p.c_str(), &d, &n) == kAbsent);
+  cardq::reset();
+  clear();
+}
+
 int main() {
   const uint8_t* d = nullptr;
   uint32_t n = 99;
@@ -779,6 +813,7 @@ int main() {
   fill_waiting_says_why();
   fill_listing_errors_ask_per_path();
   want_is_not_quadratic();
+  want_survives_hash_collisions();
   project_load();
   system(("rm -rf '" + g_card + "'").c_str());
 
