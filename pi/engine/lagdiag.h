@@ -234,4 +234,80 @@ inline unsigned fmt_rx(char* out, unsigned max, const RxDiag::Second& x) {
   return n;
 }
 
+// ---- 3. what the Pi sends the Rytm ---------------------------------------------------------------------------------------
+
+// The engine's records for the Rytm (g_ToHost, sent by usbmidi_merge.h on core 0), by what they are. The Pi's remote UI talks to
+// the Rytm in SysEx F0 7D 52 54 <cmd> ... (core/ui/remote.cpp): 3C the keepalive, 38 / 3D / 3E / 36 the frames (rects, text, text
+// clear, splash), 39 the commit, 48 the parameter writes; other commands and the host-link replies are "sx", anything else
+// (the LFOs' CCs, a piece of a long SysEx) "oth".
+enum Kind : unsigned { kKeepalive, kFrame, kCommit, kWrite, kOtherSx, kOther, kKinds };
+
+inline Kind classify(const uint8_t* rec, int len) {
+  if (rec == nullptr || len <= 0 || rec[0] != 0xF0) return kOther;
+  if (len < 6 || rec[1] != 0x7D || rec[2] != 0x52 || rec[3] != 0x54) return kOtherSx;
+  switch (rec[4]) {
+    case 0x3C: return kKeepalive;
+    case 0x38: case 0x3D: case 0x3E: case 0x36: return kFrame;
+    case 0x39: return kCommit;
+    case 0x48: return kWrite;
+    default: return kOtherSx;
+  }
+}
+
+// Per second, on core 0 (the merge's Poll and the logger are both its): the records sent by type (count, bytes of the message, not
+// of the USB packets), the peak of the engine queue's bytes waiting at the start of a Poll ("pend"), and the longest a bulk send
+// to the Rytm took (the Circle transfer blocks core 0 until the Rytm's USB MIDI endpoint accepts it: "wait"; the Rytm's mods hold
+// their output too, and this is how long that hold looks from here). No allocation, no logging; one array increment a record.
+class TxDiag {
+ public:
+  struct Second {
+    uint32_t n[kKinds], bytes[kKinds], pend_max, wait_max_us;
+  };
+  static constexpr uint32_t kWaitLineUs = 2000;   // a wait this long is a line even when only keepalives went
+
+  void record(const uint8_t* rec, int len) {
+    Kind k = classify(rec, len);
+    ++cur_.n[k];
+    cur_.bytes[k] += len > 0 ? (uint32_t)len : 0;
+  }
+  void pending(unsigned bytes) {
+    if (bytes > cur_.pend_max) cur_.pend_max = bytes;
+  }
+  void waited(uint32_t us) {
+    if (us > cur_.wait_max_us) cur_.wait_max_us = us;
+  }
+  // Since the last take. False when nothing worth a line happened: no record but keepalives (every ~0.7 s, so a line for each
+  // would be noise) and no wait of kWaitLineUs or more.
+  bool take(Second* out) {
+    bool worth = cur_.wait_max_us >= kWaitLineUs;
+    for (unsigned k = 0; k < kKinds; ++k) worth |= k != kKeepalive && cur_.n[k] != 0;
+    *out = cur_;
+    cur_ = Second{};
+    return worth;
+  }
+
+ private:
+  Second cur_ = {};
+};
+
+// "txacc: ka n1 b7 | frm n3 b78 | c39 n1 b8 | w48 n2 b20 | sx n1 b15 | oth n1 b3 | pend 4096 B | wait 840us": the types that sent
+// something, then the peak queue and the longest send. Capped to max bytes (a type that does not fit is left out).
+inline unsigned fmt_tx(char* out, unsigned max, const TxDiag::Second& x) {
+  static const char* const kName[kKinds] = {"ka", "frm", "c39", "w48", "sx", "oth"};
+  if (max == 0) return 0;
+  char tail[64];
+  unsigned tn = cut(tail, sizeof tail, LAGDIAG_FMT(tail, sizeof tail, "pend %u B | wait %uus", x.pend_max, x.wait_max_us));
+  unsigned n = cut(out, max, LAGDIAG_FMT(out, max, "txacc: "));
+  for (unsigned k = 0; k < kKinds; ++k) {
+    if (x.n[k] == 0) continue;
+    char item[48];
+    unsigned in = cut(item, sizeof item, LAGDIAG_FMT(item, sizeof item, "%s n%u b%u | ", kName[k], x.n[k], x.bytes[k]));
+    if (n + in + tn >= max) continue;
+    memcpy(out + n, item, in + 1);
+    n += in;
+  }
+  if (n + tn < max) memcpy(out + n, tail, tn + 1), n += tn;
+  return n;
+}
+
 }   // namespace lagdiag

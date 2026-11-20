@@ -242,9 +242,87 @@ static void rx_tests() {
   printf("test_lagdiag: rx report %.0f ns (this build of the host)\n", ns);
 }
 
+// ---- part 3: what the Pi sends the Rytm --------------------------------------------------------------------------------
+
+static std::vector<uint8_t> rytm_sx(uint8_t cmd, unsigned body) {   // F0 7D 52 54 <cmd> <body bytes> F7
+  std::vector<uint8_t> r = {0xF0, 0x7D, 0x52, 0x54, cmd};
+  for (unsigned i = 0; i < body; ++i) r.push_back((uint8_t)(i & 0x7F));
+  r.push_back(0xF7);
+  return r;
+}
+
+static void tx_tests() {
+  using lagdiag::TxDiag;
+  auto kind = [](const std::vector<uint8_t>& r) { return lagdiag::classify(r.data(), (int)r.size()); };
+  CHECK(kind(rytm_sx(0x3C, 1)) == lagdiag::kKeepalive);
+  CHECK(kind(rytm_sx(0x38, 20)) == lagdiag::kFrame && kind(rytm_sx(0x3D, 8)) == lagdiag::kFrame);
+  CHECK(kind(rytm_sx(0x3E, 0)) == lagdiag::kFrame && kind(rytm_sx(0x36, 3)) == lagdiag::kFrame);
+  CHECK(kind(rytm_sx(0x39, 3)) == lagdiag::kCommit);
+  CHECK(kind(rytm_sx(0x48, 4)) == lagdiag::kWrite);
+  CHECK(kind(rytm_sx(0x1D, 9)) == lagdiag::kOtherSx);                        // a host-link reply
+  CHECK(kind({0xB0, 0x10, 0x20}) == lagdiag::kOther);                         // an LFO's CC
+  CHECK(kind({0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0xF7}) == lagdiag::kOther);   // a piece of a long SysEx
+  CHECK(kind({0xF0, 0x7D, 0xF7}) == lagdiag::kOtherSx);                       // too short to name a command
+  CHECK(kind({0xF0, 0x41, 0x52, 0x54, 0x3C, 0xF7}) == lagdiag::kOtherSx);     // another maker's 3C is not our keepalive
+  CHECK(lagdiag::classify(nullptr, 0) == lagdiag::kOther);
+
+  TxDiag t;
+  TxDiag::Second s;
+  CHECK(!t.take(&s));   // nothing sent
+  auto rec = [&](const std::vector<uint8_t>& r) { t.record(r.data(), (int)r.size()); };
+  rec(rytm_sx(0x3C, 1));   // 7 bytes
+  CHECK(!t.take(&s));      // a keepalive alone is not worth a line (they come every ~0.7 s)
+  rec(rytm_sx(0x3C, 1));
+  for (int i = 0; i < 3; ++i) rec(rytm_sx(0x38, 20));   // 26 bytes each
+  rec(rytm_sx(0x39, 2));
+  rec(rytm_sx(0x48, 4));
+  rec(rytm_sx(0x48, 4));
+  rec(rytm_sx(0x1D, 9));
+  rec({0xB0, 1, 2});
+  t.pending(120);
+  t.pending(4096);
+  t.pending(300);   // the peak, not the last
+  t.waited(250);
+  t.waited(840);
+  t.waited(90);
+  CHECK(t.take(&s));
+  CHECK(s.n[lagdiag::kKeepalive] == 1 && s.bytes[lagdiag::kKeepalive] == 7);   // (the first one went with the quiet second before)
+  CHECK(s.n[lagdiag::kFrame] == 3 && s.bytes[lagdiag::kFrame] == 78);
+  CHECK(s.n[lagdiag::kCommit] == 1 && s.bytes[lagdiag::kCommit] == 8);
+  CHECK(s.n[lagdiag::kWrite] == 2 && s.bytes[lagdiag::kWrite] == 20);
+  CHECK(s.n[lagdiag::kOtherSx] == 1 && s.bytes[lagdiag::kOtherSx] == 15);
+  CHECK(s.n[lagdiag::kOther] == 1 && s.bytes[lagdiag::kOther] == 3);
+  CHECK(s.pend_max == 4096 && s.wait_max_us == 840);
+  char b[lagdiag::kLine + 8];
+  unsigned len = lagdiag::fmt_tx(b, sizeof b, s);
+  CHECK(len == strlen(b));
+  CHECK(std::string(b) == "txacc: ka n1 b7 | frm n3 b78 | c39 n1 b8 | w48 n2 b20 | sx n1 b15 | oth n1 b3 | pend 4096 B | wait 840us");
+  CHECK(!t.take(&s));   // taken: starts over
+
+  // types that sent nothing are left out; a second that sent nothing but waited long is a line too
+  t.waited(2500);
+  t.pending(10);
+  CHECK(t.take(&s));
+  len = lagdiag::fmt_tx(b, sizeof b, s);
+  CHECK(std::string(b) == "txacc: pend 10 B | wait 2500us");
+  t.waited(1999);
+  CHECK(!t.take(&s));   // a normal wait (a bulk send is a fraction of a millisecond): no line
+  rec(rytm_sx(0x39, 2));
+  CHECK(t.take(&s));
+  len = lagdiag::fmt_tx(b, sizeof b, s);
+  CHECK(std::string(b) == "txacc: c39 n1 b8 | pend 0 B | wait 0us");
+  // widest figures stay inside the cap
+  TxDiag::Second w = {};
+  for (unsigned k = 0; k < lagdiag::kKinds; ++k) w.n[k] = 4000000000u, w.bytes[k] = 4000000000u;
+  w.pend_max = w.wait_max_us = 4000000000u;
+  len = lagdiag::fmt_tx(b, lagdiag::kLine, w);
+  CHECK(len == strlen(b) && len < lagdiag::kLine);
+}
+
 int main() {
   marker_tests();
   rx_tests();
+  tx_tests();
   printf("test_lagdiag: PASS\n");
   return 0;
 }

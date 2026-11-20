@@ -241,6 +241,17 @@ rxrep: v0 n3 gap400000us m0ff0 | v5 n94 gap10700us m0003 | sx n121 max11200us ji
 - The line is capped (200 bytes); voices that do not fit are left out and counted: `| +3 more`. No line in a second without a report (a quiet Rytm costs no log).
 - Which core: the control core (core 3) measures (`RxDiag::on_sysex` in `FromRytm`: one timer read and a compare of the report's 32 parameter bytes, no allocation, no logging; `tick` in its pass closes a second with no message), core 0's once-a-second logger prints it. They meet in one published second (a seqlock).
 
+**What the Pi sends the Rytm (`txacc:`, once a second, when more than keepalives went or a send waited).** The engine's records for the Rytm's USB MIDI (the remote UI's frames, the parameter writes, host-link replies), counted when they are sent, by type:
+
+```
+txacc: ka n1 b7 | frm n150 b24000 | c39 n2 b16 | w48 n3 b27 | sx n1 b15 | oth n2 b6 | pend 4096 B | wait 840us
+```
+
+- `ka` the keepalive (SysEx `3C`), `frm` the frames (`38` rects, `3D` text, `3E` text clear, `36` splash), `c39` the commit (`39`), `w48` the parameter writes (`48`), `sx` any other SysEx (the host-link replies, other remote UI commands), `oth` everything else (the LFOs' CCs, a piece of a long SysEx). `nN` the records, `bB` their bytes as messages (F0..F7), not as USB packets. A type that sent nothing is left out. Records dropped or failed are not counted here (the `engine:` line's `dropped` and `fail` have them).
+- `pend`: the most bytes of the engine's queue (`g_MidiOut`, 32 KB, two length bytes a record) waiting at the start of a Poll in that second. `wait`: the longest one bulk send to the Rytm took, in microseconds: Circle's transfer blocks core 0 until the Rytm's USB MIDI endpoint accepts the packets (3 s at most, then it fails), so a Rytm that is slow to read shows here. This stands in for the mods' `txsx_wait` (how long the Rytm holds its output), which the Pi cannot see.
+- The line is not written for a second in which nothing but keepalives went and no send took 2 ms or more (a bulk send of a few packets takes tens of microseconds); then `ka` counts of that second are lost, by design: the keepalive is every ~0.7 s and a line each would be noise.
+- Which core: core 0 does everything (the merge's Poll counts, the same core's logger prints): one array increment a record, one timer read around a send.
+
 ## The RAM store (2026-10-26)
 
 **The rule: after a project has loaded, core 3 (the control core) never calls FatFs.** Every card call on core 3 is an audible dropout (the FIFO holds 2 ms; a card read or write is 5 to 40 ms and waits behind core 0's card service). Spec: docs/superpowers/specs/2026-10-26-ram-store-design.md; plan: docs/superpowers/plans/2026-10-26-ram-store.md.
