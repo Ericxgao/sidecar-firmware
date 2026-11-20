@@ -144,7 +144,8 @@ static const char RebootMagic[] = "RYTM-REBOOT";
 static volatile boolean s_bRebootRequested = FALSE;
 static void RebootRequest (void) { s_bRebootRequested = TRUE; }   // UART IRQ: core 0's loop stops cleanly first
 static lagdiag::Marker s_LagMarker;	// "Lag now" (lagnow): core 0 only
-static lagdiag::Snap s_LagSnap;		// the last second's figures for the marker's snapshot (LogStats, core 0)
+static lagdiag::Snap s_LagSnap;
+static unsigned s_nLagRxAt;		// when s_LagSnap.rx was set (m_Timer ticks)		// the last second's figures for the marker's snapshot (LogStats, core 0)
 static unsigned s_nMidiInLost;		// the Rytm's USB MIDI bytes lost: a full g_MidiIn (the stats line's "lost")
 // the bundle job's rescans (console commands, as the web page's uploads send them; core 0)
 static CConsole *s_pBundleConsole = 0;
@@ -1240,6 +1241,7 @@ boolean CKernel::Core0Command (const char *pCmd, void *pParam)
 		char Line[lagdiag::kLine + 200];
 		lagdiag::fmt_marker (Line, sizeof Line, n, nMs);
 		pThis->m_Logger.Write (From, LogNotice, "%s", Line);
+		if (pThis->m_Timer.GetTicks () - s_nLagRxAt > 5 * HZ) s_LagSnap.rx[0] = 0;	// the stream line only while it is fresh
 		lagdiag::fmt_snap (Line, sizeof Line, s_LagSnap);
 		pThis->m_Logger.Write (From, LogNotice, "%s", Line);
 		return TRUE;
@@ -2229,6 +2231,15 @@ void CKernel::LogStats (void)
 		m_Usb.MIDIOutBytes (), m_Usb.MIDIOutMessages (), m_Usb.MIDIOutFailed (),
 		m_Usb.MIDIOutDropped () + m_SelfTest.MIDIOutDropped () + m_Tcp.MIDIOutDropped () + g_nToHostFull + bridge::to_host_dropped (), (unsigned) (StatsPeak () * 1000),
 		nTemp);
+	{	// the Rytm's report stream, last second (lagdiag.h RxDiag; only while it flows)
+		char Rx[lagdiag::kLine];
+		if (CEngineCores::TakeRxLine (Rx, sizeof Rx) != 0)
+		{
+			m_Logger.Write (From, LogNotice, "%s", Rx);
+			memcpy (s_LagSnap.rx, Rx, sizeof Rx);
+			s_nLagRxAt = m_Timer.GetTicks ();
+		}
+	}
 	s_LagSnap.fifo_min = s.nFifoMin, s_LagSnap.under = g_Output.Underflows (), s_LagSnap.block_max_us = s.nMaxBlockUs;
 	s_LagSnap.c1 = c1, s_LagSnap.c2 = c2, s_LagSnap.c3 = c3, s_LagSnap.pass_max_us = s.nMaxPassUs;
 	s_LagSnap.midi_bytes = s.nMidiBytes, s_LagSnap.sysex = s.nSysEx;

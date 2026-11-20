@@ -83,4 +83,155 @@ inline unsigned fmt_snap(char* out, unsigned max, const Snap& s) {
   return n;
 }
 
+// ---- 2. the Rytm's report stream ---------------------------------------------------------------------------------------
+
+// The Rytm sends its voices' parameters itself (rytm-mods 0021: 03 PARAMS, 04 TRIG+PARAMS, and the MIDI machine's 43 / 44), up to
+// 94 a second a voice. The load on the Rytm's side is invisible to the Pi, but a Rytm whose audio interrupt runs late sends them
+// late: a growing gap between two reports of one voice (the Rytm's cap is a clock of its own, 16 blocks, ~10.7 ms) is that, seen
+// from here. RxDiag aggregates, per second:
+//   per voice that reported: the count, the longest gap between two reports of that voice (us), and a mask of the parameter
+//     words (P1..P16 = bits 0..15) that differed from the voice's previous report at least once
+//   every SysEx from the Rytm (reports or not): the count, the longest gap between two (us), and the jitter: the mean change
+//     between one gap and the next (us)
+// WHICH CORE. on_sysex and tick run on the control core (core 3), where the Rytm's MIDI bytes are parsed (cores.cpp FromRytm,
+// and the pass loop for tick): fixed arrays, no allocation, no logging, a few dozen instructions a report. take runs on core 0's
+// once-a-second logger, which prints the line. The two meet in one published second, a seqlock (a reader that meets a write
+// takes nothing and tries again a second later: it never blocks the writer, never reads a half-written second).
+// The time is the control core's when it handles the message: a message that sat in the 8 KB MIDI queue while a long pass ran
+// arrives late by that, which is itself what is wanted (the pass max is in the engine: line).
+class RxDiag {
+ public:
+  static constexpr unsigned kVoices = 8;
+  static constexpr uint64_t kSecondUs = 1000000;
+  static constexpr uint64_t kStreamGapUs = 1000000;   // a longer gap is a pause, not a late report: it only restarts the measuring
+
+  struct Second {   // one second of the stream; all words, for the seqlock
+    uint32_t n[kVoices], gap_us[kVoices], mask[kVoices];
+    uint32_t sx_n, sx_max_us, sx_jit_us;
+  };
+
+  // A SysEx from the Rytm (F0 .. F7), now_us a microsecond clock
+  void on_sysex(uint64_t now_us, const uint8_t* d, int len) {
+    roll_if_due(now_us);
+    if (!open_) open_ = true, start_ = now_us;
+    ++cur_.sx_n;
+    if (sx_seen_) {
+      uint64_t iv = now_us - sx_last_;
+      if (iv <= kStreamGapUs) {
+        if (iv > cur_.sx_max_us) cur_.sx_max_us = (uint32_t)iv;
+        if (iv_seen_) jit_sum_ += iv > prev_iv_ ? iv - prev_iv_ : prev_iv_ - iv, ++jit_n_;
+        prev_iv_ = iv, iv_seen_ = true;
+      } else {
+        iv_seen_ = false;
+      }
+    }
+    sx_last_ = now_us, sx_seen_ = true;
+    // a report: F0 7D 52 54 <cmd> <machine | voice> ..., the layout of core/voices.cpp voice_report
+    if (len < 23 || d[0] != 0xF0 || d[1] != 0x7D || d[2] != 0x52 || d[3] != 0x54) return;
+    const uint8_t cmd = d[4];
+    const uint8_t* raw;
+    unsigned np;
+    if (cmd == 0x04 || cmd == 0x44) {
+      if (len < 25) return;
+      raw = d + 8, np = len >= 41 ? 16 : 8;
+    } else if (cmd == 0x03 || cmd == 0x43) {
+      raw = d + 6, np = len >= 39 ? 16 : 8;
+    } else {
+      return;
+    }
+    const unsigned vi = d[5] & 7;
+    Voice& v = voice_[vi];
+    ++cur_.n[vi];
+    if (v.seen) {
+      uint64_t gap = now_us - v.last;
+      if (gap <= kStreamGapUs && gap > cur_.gap_us[vi]) cur_.gap_us[vi] = (uint32_t)gap;
+    }
+    v.last = now_us, v.seen = true;
+    uint32_t changed = 0;
+    for (unsigned i = 0; i < np; ++i) {
+      if (i < v.known && (raw[2 * i] != v.w[2 * i] || raw[2 * i + 1] != v.w[2 * i + 1])) changed |= 1u << i;
+      v.w[2 * i] = raw[2 * i], v.w[2 * i + 1] = raw[2 * i + 1];
+    }
+    if (np > v.known) v.known = np;
+    cur_.mask[vi] |= changed;
+  }
+
+  // The control core's pass: a second without a message ends too
+  void tick(uint64_t now_us) { roll_if_due(now_us); }
+
+  // Core 0: the newest second not taken yet, true if there is one. Only seconds with a report in them are ever published.
+  bool take(Second* out) {
+    uint32_t s1 = __atomic_load_n(&seq_, __ATOMIC_ACQUIRE);
+    if ((s1 & 1) || s1 == taken_) return false;
+    uint32_t* o = reinterpret_cast<uint32_t*>(out);
+    for (unsigned i = 0; i < kWords; ++i) o[i] = __atomic_load_n(&pub_[i], __ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (__atomic_load_n(&seq_, __ATOMIC_RELAXED) != s1) return false;   // a write met the read: next time
+    taken_ = s1;
+    return true;
+  }
+
+ private:
+  static constexpr unsigned kWords = sizeof(Second) / sizeof(uint32_t);
+  static_assert(sizeof(Second) % sizeof(uint32_t) == 0, "Second is words");
+  struct Voice {
+    uint64_t last;
+    bool seen;
+    unsigned known;   // words of w that have a value
+    uint8_t w[32];
+  };
+
+  void roll_if_due(uint64_t now_us) {
+    if (open_ && now_us - start_ >= kSecondUs) roll();
+  }
+  void roll() {
+    bool active = false;
+    for (unsigned v = 0; v < kVoices; ++v) active |= cur_.n[v] != 0;
+    if (active) {
+      cur_.sx_jit_us = jit_n_ ? (uint32_t)(jit_sum_ / jit_n_) : 0;
+      const uint32_t* c = reinterpret_cast<const uint32_t*>(&cur_);
+      uint32_t s = seq_;
+      __atomic_store_n(&seq_, s + 1, __ATOMIC_RELAXED);
+      __atomic_thread_fence(__ATOMIC_RELEASE);
+      for (unsigned i = 0; i < kWords; ++i) __atomic_store_n(&pub_[i], c[i], __ATOMIC_RELAXED);
+      __atomic_store_n(&seq_, s + 2, __ATOMIC_RELEASE);
+    }
+    memset(&cur_, 0, sizeof cur_);
+    jit_sum_ = jit_n_ = 0;
+    open_ = false;
+  }
+
+  Second cur_ = {};
+  Voice voice_[kVoices] = {};
+  uint64_t start_ = 0, sx_last_ = 0, prev_iv_ = 0, jit_sum_ = 0, jit_n_ = 0;
+  bool open_ = false, sx_seen_ = false, iv_seen_ = false;
+  uint32_t seq_ = 0, taken_ = 0;
+  uint32_t pub_[kWords] = {};
+};
+
+// "rxrep: v5 n94 gap10700us m0003 | v6 n93 gap10900us m0ff0 | sx n121 max11200us jit410us": the voices that reported only, the gap
+// and the changed-words mask (hex, P1 = bit 0) of each, then every SysEx's figures. Capped to max bytes (and kLine by the caller's
+// choice of max): voices that do not fit are left out and counted as "+N more".
+inline unsigned fmt_rx(char* out, unsigned max, const RxDiag::Second& x) {
+  if (max == 0) return 0;
+  char sx[64];
+  unsigned sxn = cut(sx, sizeof sx, LAGDIAG_FMT(sx, sizeof sx, " | sx n%u max%uus jit%uus", x.sx_n, x.sx_max_us, x.sx_jit_us));
+  unsigned n = cut(out, max, LAGDIAG_FMT(out, max, "rxrep:"));
+  unsigned left = 0;
+  for (unsigned v = 0; v < RxDiag::kVoices; ++v) {
+    if (x.n[v] == 0) continue;
+    char item[56];
+    unsigned in = cut(item, sizeof item, LAGDIAG_FMT(item, sizeof item, " %sv%u n%u gap%uus m%04x", n > 6 ? "| " : "", v, x.n[v], x.gap_us[v], x.mask[v] & 0xFFFF));
+    if (left || n + in + 12 + sxn >= max) {   // (12: " | +N more")
+      ++left;
+      continue;
+    }
+    memcpy(out + n, item, in + 1);
+    n += in;
+  }
+  if (left && n + 12 + sxn < max) n += cut(out + n, max - n, LAGDIAG_FMT(out + n, max - n, " | +%u more", left));
+  if (n + sxn < max) memcpy(out + n, sx, sxn + 1), n += sxn;
+  return n;
+}
+
 }   // namespace lagdiag

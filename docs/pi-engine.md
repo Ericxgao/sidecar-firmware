@@ -230,6 +230,17 @@ lag-snap: fifo min 71 under 411 | block max 17 us | cpu c1 5.3 c2 2.3 c3 11.9 % 
 - `lag-snap`: the last `engine:` line's per-second figures (FIFO minimum, `under` total, longest audio block, the cores' busy share, longest control pass, the Rytm's MIDI bytes and SysEx count, what was sent to the Rytm and dropped), so the marker and the counters of that second sit together. The last `rxrep` and `txacc` lines follow it as `| rx: ...` and `| tx: ...` when they are less than 5 s old (below).
 - The command is exactly `lagnow` and takes no argument; `lagnow=anything` is refused with a fixed warning, and no text from the client reaches the log. Like every console command it needs a paired browser (`POST /cmd`, `/ws` `cmd`); it runs on core 0, where the log lines are written.
 
+**The Rytm's report stream (`rxrep:`, once a second, only while a voice reports).** The Rytm sends its voices' parameters itself (03 PARAMS, 04 TRIG+PARAMS, the MIDI machine's 43 and 44), up to 94 a second a voice. No Pi counter shows the Rytm's own load, but a Rytm whose audio interrupt runs late sends these late. One line, the voices that reported only:
+
+```
+rxrep: v0 n3 gap400000us m0ff0 | v5 n94 gap10700us m0003 | sx n121 max11200us jit410us
+```
+
+- `vV nN gapG mMMMM`: voice V (0..7, the report's track byte) sent N reports in the second; `gap` is the longest time between two reports **of that voice**, in microseconds (the first of a second reaches back to the last of the second before; a gap over 1 s is a pause and only restarts the measuring); `m` is a mask, in hex, of the parameter words P1..P16 (bit 0 = P1) that differed from the voice's previous report at least once in the second. The first report of a voice has nothing to differ from.
+- `sx nN maxMus jitJus`: every SysEx from the Rytm, reports or not: the count, the longest time between two, and the jitter (the mean change from one interval to the next). The times are those of the control core when it takes the message from the 8 KB MIDI queue: a message that waited behind a long control pass is late by that, which is also what the Rytm's own lateness looks like from here. Compare `pass max` in the `engine:` line.
+- The line is capped (200 bytes); voices that do not fit are left out and counted: `| +3 more`. No line in a second without a report (a quiet Rytm costs no log).
+- Which core: the control core (core 3) measures (`RxDiag::on_sysex` in `FromRytm`: one timer read and a compare of the report's 32 parameter bytes, no allocation, no logging; `tick` in its pass closes a second with no message), core 0's once-a-second logger prints it. They meet in one published second (a seqlock).
+
 ## The RAM store (2026-10-26)
 
 **The rule: after a project has loaded, core 3 (the control core) never calls FatFs.** Every card call on core 3 is an audible dropout (the FIFO holds 2 ms; a card read or write is 5 to 40 ms and waits behind core 0's card service). Spec: docs/superpowers/specs/2026-10-26-ram-store-design.md; plan: docs/superpowers/plans/2026-10-26-ram-store.md.
