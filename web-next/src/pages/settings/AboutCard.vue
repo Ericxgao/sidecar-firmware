@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import Card from "../../ui/Card.vue";
+import LagButton from "../../ui/LagButton.vue";
 import { useSidecar } from "../../lib/useSidecar";
 import { uptimeText } from "../../lib/status";
 import { WEB_BUILD, buildState, buildText } from "../../lib/build";
@@ -33,6 +34,10 @@ const rows = computed(() => {
         <dd>{{ v }}</dd>
       </template>
     </dl>
+    <p class="lag">
+      <LagButton />
+      Press it when the Rytm feels slow: the Sidecar notes the moment in its black box (one a second), so the log can be read around it.
+    </p>
     <p class="classic"><a href="/classic">The classic page</a> (the Sidecar's first web page, still served)</p>
   </Card>
 </template>
@@ -40,6 +45,7 @@ const rows = computed(() => {
 <style scoped>
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0; align-items: baseline; }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
+.lag { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin: 0.75rem 0 0; }
 .classic { margin: 0.75rem 0 0; }
 .classic a { color: var(--accent); }
 </style>
