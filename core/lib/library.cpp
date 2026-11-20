@@ -1022,10 +1022,10 @@ void walk_end() {
   g_cursor = 0;
   g_refs_dirty = true;
   st_begin();
-  g_st.walked = g_walked;
+  g_st.walked = g_walked, g_st.deep_skipped = g_deep;
   st_end();
   logf("walk: %lu entries, %lu changes", (unsigned long)g_walked, (unsigned long)g_walk_changes);
-  if (g_deep) logf("walk: %lu folder(s) deeper than %d levels skipped", (unsigned long)g_deep, kDepth);
+  if (g_deep) logf("walk: %lu folder(s) below %d levels skipped (counted: the first too-deep folder of each chain; nothing inside is indexed)", (unsigned long)g_deep, kDepth);
 }
 // up to n entries; true when the walk is over
 bool walk_step(int n) {
@@ -1062,7 +1062,7 @@ bool walk_step(int n) {
         g_lv[g_depth].plen = (uint16_t)(pl + 1 + nl);
       } else {
         if (g_depth < kDepth) g_lv[g_depth + 1].d.close();   // (g_lv has kDepth + 1 levels: none below the deepest)
-        else ++g_deep;                                       // (a folder below kDepth: not walked, counted)
+        else ++g_deep;                                       // (the first folder below kDepth of a chain: not walked, counted)
         g_wpath[pl] = 0;
       }
       continue;

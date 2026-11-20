@@ -1,7 +1,7 @@
 // core/tests/test_library_depth.cpp - the library's walk on a card with folders nested deeper than lib's kDepth (12):
 // the walk must not index its level table past its end (an out-of-bounds close at the deepest level, caught by
 // UBSan/ASan builds), must index every sample down to the deepest walked folder and must skip what lies deeper (the
-// walk counts the skipped folders and names them once in the console log).
+// walk counts the first too-deep folder of each chain, Stats::deep_skipped, and logs the count once).
 #include <unistd.h>
 
 #include <cstdio>
@@ -65,8 +65,10 @@ int main() {
   CHECK(n < 200000);
   lib::Stats st = lib::stats();
   CHECK(st.state == lib::kReady);
+  // the 11 and 12 here and below are lib's kDepth (12, private to library.cpp): a change of it fails this test loudly
   // top.wav + the samples of d1..d11 (Samples is the 1st folder down, d11 the 12th: the deepest walked)
   CHECK(st.files == 1 + 11);
+  CHECK(st.deep_skipped == 1);   // d12 is the one chain's first too-deep folder (its d13.. are never listed)
   std::string path = "/Samples";
   for (int i = 1; i <= kLevels; ++i) {
     path += "/d" + std::to_string(i);
