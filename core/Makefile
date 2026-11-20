@@ -169,7 +169,7 @@ ALL_TESTS := $(TESTS) $(MC_TESTS) $(SMALL_TESTS) $(NOMORPH_TESTS)
 # The tests that check a wall-clock bound (a control pass under the FIFO, a call under 50 us): run one at a time after
 # the parallel batch, when nothing else loads the CPU (under -j10 test_library_stall measured a 2142 us pass, 1835 alone)
 TIMING_TESTS := $(addprefix $(B)/,test_bundle_stall test_library_stall test_loadstall test_insert test_sat test_library test_tape \
-                  test_send_fx test_srclib test_seqtop test_noteedit test_stereo test_msamp_load)
+                  test_send_fx test_srclib test_seqtop test_noteedit test_stereo test_msamp_load test_projload_cost)
 # The Teensy's configuration (no CORE_POLY, no CORE_MSAMP: no built-in MD), compiled for syntax only on the files the
 # MD change touched that build there today (voices.cpp, ui/remote.cpp, lfo.cpp and a few more already fail in that
 # configuration on integ-1028, unrelated: not listed); core/mod (spec-050 1.7: kV and kFx only there)

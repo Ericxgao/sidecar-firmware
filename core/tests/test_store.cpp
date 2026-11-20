@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "check.h"
+#include "timing.h"
 #include "../core.h"
 #include "../fmt/fmt.h"
 #include "../fx/insert.h"
@@ -643,6 +644,55 @@ static void project_load() {
   cardq::reset();
 }
 
+// A project load wants ~1000 paths in ONE control pass (pool.cpp project_fill_begin): the black box of 2026-11-20 had that
+// pass at 10.3 ms on a Pi 5 (24 ms at 1 GHz), the FIFO holds 2 ms. want() checked each path against every path wanted before
+// (a strcmp scan over 96-byte slots): ~500,000 compares for 1000 paths. Now a hash finds a repeat. Checked: the answers as
+// before (a repeat ignored, the cap, a cleared list wanted afresh, every path read once), and the time of a project's worth
+// of wants (the Mac's CPU x 4.4 for the Pi, as test_loadstall) under the FIFO.
+static void want_is_not_quadratic() {
+  const uint8_t* d = nullptr;
+  uint32_t n = 0;
+  clear();
+  cardq::reset();
+  cardq::set_worker(true);
+  std::vector<std::string> paths;
+  for (int f = 0; f < 6; ++f)
+    for (int k = 0; k < 256 && (int)paths.size() < kMaxEntries; ++k) {
+      char p[64];
+      sniprintf(p, sizeof p, "/.rytm/seq/WQ%d/p%03d.sqp", f, k);
+      paths.push_back(p);
+    }
+  CHECK((int)paths.size() == kMaxEntries);
+  auto want_all = [&] { for (const std::string& p : paths) want(p.c_str()); };
+  CHECK(timing_retry("1536 wanted paths", [&] {
+    clear();
+    uint64_t t0 = timing_cpu_us();
+    want_all();
+    uint64_t pi = (timing_cpu_us() - t0) * 44 / 10;
+    printf("store: %d wanted paths: %llu us on the Pi\n", kMaxEntries, (unsigned long long)pi);
+    return pi < 2000;
+  }));
+  // repeats ignored, and a path past the cap refused
+  clear();
+  want_all();
+  want_all();
+  want("/.rytm/seq/WQ9/over.sqp");
+  fill_begin();
+  CHECK(run_fill());
+  CHECK(entries() == kMaxEntries && get("/.rytm/seq/WQ9/over.sqp", &d, &n) == kUnknown);
+  CHECK(get(paths.front().c_str(), &d, &n) == kAbsent && get(paths.back().c_str(), &d, &n) == kAbsent);
+  // a cleared list wants the same paths afresh (the table is cleared with it), and only those
+  clear();
+  want(paths[7].c_str());
+  want(paths[7].c_str());
+  want(paths[900].c_str());
+  fill_begin();
+  CHECK(run_fill());
+  CHECK(entries() == 2 && get(paths[8].c_str(), &d, &n) == kUnknown);
+  cardq::reset();
+  clear();
+}
+
 int main() {
   const uint8_t* d = nullptr;
   uint32_t n = 99;
@@ -728,6 +778,7 @@ int main() {
   fill_lists_around_a_pending_write();
   fill_waiting_says_why();
   fill_listing_errors_ask_per_path();
+  want_is_not_quadratic();
   project_load();
   system(("rm -rf '" + g_card + "'").c_str());
 
