@@ -215,6 +215,21 @@ Each file is written whole (a `.tmp` file, then a rename), and nothing that exis
 - **Design lesson: `/status` only answers 20 to 40 s after boot and `/log` holds ~25 s, so anything needed about boot must be frozen, not rolling.** A rolling ring was overwritten before anyone could read it (this one, and the USB hub descriptor line earlier the same day). Freeze at the event (`mbBoot`), or keep a counter that carries enough to reconstruct it (`outDiag`).
 - Two bugs this found on the device that the host tests passed: arming at an unset target (target 0 armed at once), and a trace ring flooded by once-a-second reads.
 
+### Lag diagnostics (the black box, `pi/engine/lagdiag.h`)
+
+For a Rytm that feels laggy while no Sidecar counter moves (the 2026-11-20 black box analysis). Everything here goes into the log, so the black box keeps it. Nothing is added to the Rytm's mods.
+
+**Lag now (`lagnow`).** A button in the web app (the header on every page, so it is within reach while playing, and Settings > About) sends the console command `lagnow`. The Sidecar answers with two log lines:
+
+```
+lag-marker 3 at 00:48:21.15
+lag-snap: fifo min 71 under 411 | block max 17 us | cpu c1 5.3 c2 2.3 c3 11.9 % | pass max 121 us | midi 8391 B sysex 103262 | to-host 545408 B 20631 msgs fail 0 dropped 0
+```
+
+- `lag-marker N at HH:MM:SS.cc`: N counts the markers since the boot; the time is the Sidecar's uptime, the same clock as the log's time stamps. One marker a second at most (a held or double-tapped button is one); the page keeps the same rule.
+- `lag-snap`: the last `engine:` line's per-second figures (FIFO minimum, `under` total, longest audio block, the cores' busy share, longest control pass, the Rytm's MIDI bytes and SysEx count, what was sent to the Rytm and dropped), so the marker and the counters of that second sit together. The last `rxrep` and `txacc` lines follow it as `| rx: ...` and `| tx: ...` when they are less than 5 s old (below).
+- The command is exactly `lagnow` and takes no argument; `lagnow=anything` is refused with a fixed warning, and no text from the client reaches the log. Like every console command it needs a paired browser (`POST /cmd`, `/ws` `cmd`); it runs on core 0, where the log lines are written.
+
 ## The RAM store (2026-10-26)
 
 **The rule: after a project has loaded, core 3 (the control core) never calls FatFs.** Every card call on core 3 is an audible dropout (the FIFO holds 2 ms; a card read or write is 5 to 40 ms and waits behind core 0's card service). Spec: docs/superpowers/specs/2026-10-26-ram-store-design.md; plan: docs/superpowers/plans/2026-10-26-ram-store.md.

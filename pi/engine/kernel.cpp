@@ -8,6 +8,7 @@
 #include "ob_follow.h"	// CObFollow::HaltResets (/status "usbhalt")
 #include "mbtrace.h"
 #include "blackbox_pi.h"	// the black box (2026-10-30): the whole log appended to /.rytm/blackbox.log
+#include "lagdiag.h"	// "Lag now" and the lag diagnostics lines (lagdiag.h)
 #include "crumb.h"		// the crash breadcrumb (2026-10-29): kept over a watchdog reset, reported here at the next boot
 
 static volatile unsigned s_nTempC;	// the SoC temperature as the stats line last read it (once a second); /status and the UI show this
@@ -142,6 +143,8 @@ private:
 static const char RebootMagic[] = "RYTM-REBOOT";
 static volatile boolean s_bRebootRequested = FALSE;
 static void RebootRequest (void) { s_bRebootRequested = TRUE; }   // UART IRQ: core 0's loop stops cleanly first
+static lagdiag::Marker s_LagMarker;	// "Lag now" (lagnow): core 0 only
+static lagdiag::Snap s_LagSnap;		// the last second's figures for the marker's snapshot (LogStats, core 0)
 static unsigned s_nMidiInLost;		// the Rytm's USB MIDI bytes lost: a full g_MidiIn (the stats line's "lost")
 // the bundle job's rescans (console commands, as the web page's uploads send them; core 0)
 static CConsole *s_pBundleConsole = 0;
@@ -1224,6 +1227,23 @@ boolean CKernel::Core0Command (const char *pCmd, void *pParam)
 {
 	CKernel *pThis = (CKernel *) pParam;
 	if (pThis->UsbCommand (pCmd)) return TRUE;			// usbmode= (the USB-C mode)
+	if (strncmp (pCmd, "lagnow", 6) == 0)				// "Lag now": a marker in the black box (lagdiag.h)
+	{
+		if (!lagdiag::is_marker_cmd (pCmd))			// (an argument: refused, and never copied into the log)
+		{
+			pThis->m_Logger.Write (From, LogWarning, "lagnow takes no argument");
+			return TRUE;
+		}
+		unsigned nMs = pThis->m_Timer.GetTicks () * (1000 / HZ);
+		unsigned n = s_LagMarker.press (nMs);
+		if (n == 0) return TRUE;				// a second has not passed since the last
+		char Line[lagdiag::kLine + 200];
+		lagdiag::fmt_marker (Line, sizeof Line, n, nMs);
+		pThis->m_Logger.Write (From, LogNotice, "%s", Line);
+		lagdiag::fmt_snap (Line, sizeof Line, s_LagSnap);
+		pThis->m_Logger.Write (From, LogNotice, "%s", Line);
+		return TRUE;
+	}
 	if (strncmp (pCmd, "poweroff", 8) == 0 && (pCmd[8] == 0 || pCmd[8] == '='))	// a clean power-off (docs/pi5.md)
 	{
 #if RASPPI >= 5
@@ -2209,6 +2229,11 @@ void CKernel::LogStats (void)
 		m_Usb.MIDIOutBytes (), m_Usb.MIDIOutMessages (), m_Usb.MIDIOutFailed (),
 		m_Usb.MIDIOutDropped () + m_SelfTest.MIDIOutDropped () + m_Tcp.MIDIOutDropped () + g_nToHostFull + bridge::to_host_dropped (), (unsigned) (StatsPeak () * 1000),
 		nTemp);
+	s_LagSnap.fifo_min = s.nFifoMin, s_LagSnap.under = g_Output.Underflows (), s_LagSnap.block_max_us = s.nMaxBlockUs;
+	s_LagSnap.c1 = c1, s_LagSnap.c2 = c2, s_LagSnap.c3 = c3, s_LagSnap.pass_max_us = s.nMaxPassUs;
+	s_LagSnap.midi_bytes = s.nMidiBytes, s_LagSnap.sysex = s.nSysEx;
+	s_LagSnap.sent_bytes = m_Usb.MIDIOutBytes (), s_LagSnap.sent_msgs = m_Usb.MIDIOutMessages (), s_LagSnap.sent_fail = m_Usb.MIDIOutFailed ();
+	s_LagSnap.dropped = m_Usb.MIDIOutDropped () + m_SelfTest.MIDIOutDropped () + m_Tcp.MIDIOutDropped () + g_nToHostFull + bridge::to_host_dropped ();
 	static unsigned s_nPowerTick;
 	if (++s_nPowerTick % 10 == 0) { mbtrace::Scope Mb (1); ReadPower (FALSE); }	// every 10 s (a mailbox call)
 	if (s_nPowerTick % 10 == 5)				// every 10 s: the heat's figures, in the black box as well

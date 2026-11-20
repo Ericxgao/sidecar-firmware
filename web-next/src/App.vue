@@ -6,6 +6,7 @@ import { computed, ref, watch } from "vue";
 import Logo from "./components/Logo.vue";
 import SignalTide from "./components/SignalTide.vue";
 import ConfirmDialog from "./ui/ConfirmDialog.vue";
+import LagButton from "./ui/LagButton.vue";
 import Toasts from "./ui/Toasts.vue";
 import { notify } from "./lib/notify";
 import { boxName } from "./lib/tiles";
@@ -78,11 +79,14 @@ watch(paired, (now, before) => {
         <Logo :size="40" animated />
         <span class="wordmark">SIDECAR</span>
       </span>
-      <p class="state" role="status" aria-live="polite">
-        <span v-if="transport">{{ transport }}</span>
-        <span class="lamp" :class="{ on: state === 'open' }" aria-hidden="true" />
-        <span>{{ conn }}</span>
-      </p>
+      <div class="right">
+        <p class="state" role="status" aria-live="polite">
+          <span v-if="transport">{{ transport }}</span>
+          <span class="lamp" :class="{ on: state === 'open' }" aria-hidden="true" />
+          <span>{{ conn }}</span>
+        </p>
+        <LagButton compact />
+      </div>
     </div>
   </header>
   <nav aria-label="Pages" class="tabs">
@@ -117,6 +121,7 @@ watch(paired, (now, before) => {
   background: color-mix(in srgb, var(--tide-bg) 82%, transparent); border-radius: var(--radius-pill);
 }
 .wordmark { font-weight: 700; letter-spacing: 0.22em; font-size: clamp(1.25rem, 4vw, 1.875rem); }
+.right { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .state {
   margin: 0; display: inline-flex; align-items: center; gap: 0.625rem; padding: 0.375rem 0.75rem;
   border-radius: var(--radius-pill); background: color-mix(in srgb, var(--bg) 82%, transparent); font-size: 0.9375rem;
