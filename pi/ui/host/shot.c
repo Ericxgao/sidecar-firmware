@@ -1611,6 +1611,13 @@ static void theme_run (int style, const char *pre)
 	EXPECT (sidecar_ui_page () == 15 && sidecar_wgview_pool_page_shown ());
 	tap (WG_SRC_X, WG_KY);			// DONE
 	EXPECT (sidecar_ui_page () == 1);
+	// Settings > Pool, its JUNO tab (the PRESET page), Settings > Pool again from there: POOL, and DONE back to Settings
+	// (0.5.1 stored PRESET as where POOL came from: page_sec recursed without end, and DONE looped POOL <-> PRESET)
+	tap_raw (SUBX (6, 3), SUBY); EXPECT (sidecar_ui_page () == 15);
+	tap (tx0 + 3 * tw5 + tw5 / 2, WG_ROW (0)); EXPECT (sidecar_ui_page () == 18);
+	tap_raw (SUBX (6, 3), SUBY); EXPECT (sidecar_ui_page () == 15 && sidecar_wgview_pool_page_shown ());
+	tap (WG_SRC_X, WG_KY);			// DONE
+	EXPECT (sidecar_ui_page () == 1);
 	// the POOL page's JUNO / 6-OP tabs: the preset pages (sidecar_preset.c). The JUNO list, a slot's menu (REPLACE), the
 	// index aimed at the slot (a folder, a preset: preset=juno:set:..), an empty slot, ADD (the first empty slot), the FM
 	// list holding the built-ins, the index scrolled, the tabs back to the pool lists

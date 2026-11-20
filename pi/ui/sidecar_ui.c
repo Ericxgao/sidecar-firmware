@@ -702,7 +702,7 @@ static void sub_go (int sec, int i)
 {
 	if (i < 0 || i >= kSub[sec].n) i = 0;
 	const int page = kSub[sec].page[i];
-	if (page == PG_POOL && s_nPage != PG_POOL) s_nPoolFrom = s_nPage;
+	if (page == PG_POOL && s_nPage != PG_POOL && s_nPage != PG_PRESET) s_nPoolFrom = s_nPage;	// PRESET is POOL's own sub-page: keep where POOL came from
 	if (sec == NAV_SONG) sidecar_song_explain (i == 1);
 	if (sec == NAV_REC) sidecar_rec_takes (i == 1);
 	if (page == PG_MACH) sidecar_wgview_want (-1);			// the Rytm's selected voice, as the VOICE page's source tap
@@ -765,7 +765,7 @@ static void project_hit (lv_obj_t *parent, int x, int y, int w, int h)	// the ho
 // the POOL page: the machine view's ALL POOLS or Settings > Pool opens it, its DONE goes back to where it came from
 static void pool_page (int open)
 {
-	if (open) { if (s_nPage != PG_POOL) s_nPoolFrom = s_nPage; show_page (PG_POOL); }
+	if (open) { if (s_nPage != PG_POOL && s_nPage != PG_PRESET) s_nPoolFrom = s_nPage; show_page (PG_POOL); }
 	else show_page (s_nPoolFrom == PG_POOL ? PG_HOME : s_nPoolFrom);
 }
 // the POOL page's JUNO / 6-OP tabs open the preset page (sidecar_preset.h); its SAMPLES / TABLES / INSTR tabs go back to the
