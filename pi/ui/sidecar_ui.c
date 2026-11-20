@@ -697,7 +697,7 @@ static void keys_auto_cb (lv_obj_t *o, int i, void *ud)	// Settings > MIDI: the 
 }
 static void show_page (int page);
 // a pill (or a section's key: its remembered pill): the page, and for SONG's Setup and REC's Takes the view of it
-static int pool_from_voice (void) { return s_nPoolFrom != PG_POOL && s_nPoolFrom != PG_HOME && page_sec (s_nPoolFrom) == NAV_VOICE; }
+static int pool_from_voice (void) { return s_nPoolFrom != PG_POOL && s_nPoolFrom != PG_PRESET && s_nPoolFrom != PG_HOME && page_sec (s_nPoolFrom) == NAV_VOICE; }
 static void sub_go (int sec, int i)
 {
 	if (i < 0 || i >= kSub[sec].n) i = 0;
