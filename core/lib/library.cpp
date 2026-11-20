@@ -752,6 +752,7 @@ struct Level {
 };
 Level g_lv[kDepth + 1];
 int g_depth = -1;
+uint32_t g_deep = 0;   // folders below kDepth skipped in this walk (their samples are not indexed)
 char g_wpath[512];
 
 // compaction
@@ -973,7 +974,7 @@ void walk_begin() {
   walk_close();
   for (uint32_t i = 0; i < W.n; ++i) W.r[i].flags &= (uint16_t)~fSeen;
   g_tree = 0xcbf29ce484222325ull;
-  g_walked = 0, g_walk_changes = 0;
+  g_walked = 0, g_walk_changes = 0, g_deep = 0;
   g_walk_done = false;
   f_clear(g_fnext), g_fwalk = true;
   sniprintf(g_wpath, sizeof g_wpath, "/");
@@ -1024,6 +1025,7 @@ void walk_end() {
   g_st.walked = g_walked;
   st_end();
   logf("walk: %lu entries, %lu changes", (unsigned long)g_walked, (unsigned long)g_walk_changes);
+  if (g_deep) logf("walk: %lu folder(s) deeper than %d levels skipped", (unsigned long)g_deep, kDepth);
 }
 // up to n entries; true when the walk is over
 bool walk_step(int n) {
@@ -1059,7 +1061,8 @@ bool walk_step(int n) {
         ++g_depth;
         g_lv[g_depth].plen = (uint16_t)(pl + 1 + nl);
       } else {
-        g_lv[g_depth + 1].d.close();
+        if (g_depth < kDepth) g_lv[g_depth + 1].d.close();   // (g_lv has kDepth + 1 levels: none below the deepest)
+        else ++g_deep;                                       // (a folder below kDepth: not walked, counted)
         g_wpath[pl] = 0;
       }
       continue;
