@@ -145,6 +145,14 @@ watch(paired, (now, before) => {
   .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; padding-bottom: 0.5rem; }
   .tab { flex: none; padding: 0.625rem 0.875rem; }
   .over { padding: 0.75rem 1rem; }
+  /* the header is the tide's height and clips: on a phone it grows with what is laid over it (the tide and the brand row share
+     one grid cell), and "Lag now" takes the first row beside the brand, the status pill the second */
+  .top { display: grid; }
+  .top > * { grid-area: 1 / 1; }
+  .over { position: relative; inset: auto; align-self: start; }
+  .right { display: contents; }
+  .right :deep(.lag) { order: 1; }
+  .state { order: 2; }
 }
 .banner { width: calc(100% - 2rem); max-width: calc(var(--page) - 2rem); margin: 0.5rem auto 0; padding: 0.75rem 1rem; border: 2px solid var(--warm); border-radius: var(--radius-control); color: var(--warm); }
 .banner a { color: var(--warm); font-weight: 700; }

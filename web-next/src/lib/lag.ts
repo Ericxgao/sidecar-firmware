@@ -31,3 +31,15 @@ export class LagMarker {
     return "sent";
   }
 }
+
+let shared: { cmd: (c: string) => Promise<void>; marker: LagMarker } | null = null;
+/** The one marker of the page: every button shares its second (a press in one and then the other is not a second toast). */
+export function sharedMarker(cmd: (c: string) => Promise<void>, now?: () => number): LagMarker {
+  if (!shared || shared.cmd !== cmd) shared = { cmd, marker: new LagMarker(cmd, now) };
+  return shared.marker;
+}
+
+/** Why the button cannot be pressed, in a word for its label: "" when it can. */
+export function lagBlocked(state: string, paired: boolean): "" | "offline" | "pair first" {
+  return state !== "open" ? "offline" : paired ? "" : "pair first";
+}
