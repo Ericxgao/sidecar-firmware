@@ -144,8 +144,8 @@ static const char RebootMagic[] = "RYTM-REBOOT";
 static volatile boolean s_bRebootRequested = FALSE;
 static void RebootRequest (void) { s_bRebootRequested = TRUE; }   // UART IRQ: core 0's loop stops cleanly first
 static lagdiag::Marker s_LagMarker;	// "Lag now" (lagnow): core 0 only
-static lagdiag::Snap s_LagSnap;
-static unsigned s_nLagRxAt, s_nLagTxAt;	// when s_LagSnap.rx / .tx were set (m_Timer ticks)		// the last second's figures for the marker's snapshot (LogStats, core 0)
+static lagdiag::Snap s_LagSnap;		// the last second's figures for the marker's snapshot (LogStats, core 0)
+static unsigned s_nLagRxAt, s_nLagTxAt;	// when s_LagSnap.rx / .tx were set (m_Timer ticks)
 static unsigned s_nMidiInLost;		// the Rytm's USB MIDI bytes lost: a full g_MidiIn (the stats line's "lost")
 // the bundle job's rescans (console commands, as the web page's uploads send them; core 0)
 static CConsole *s_pBundleConsole = 0;
