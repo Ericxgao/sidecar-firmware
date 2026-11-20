@@ -33,7 +33,7 @@ CORE_OBJ    := $(addprefix $(B)/obj/,$(CORE_O))
 MC_CORE_OBJ := $(addprefix $(MC)/obj/,$(CORE_O))
 .SECONDARY:   # (make would delete the objects after a run as intermediates, and compile them all again the next)
 
-.PHONY: engines test lib clean demo-wavegrain demo-insfx demo-tape demo-amp demo-livein demo-chop bundle-tool fuzz-fmt
+.PHONY: engines test lib clean demo-wavegrain demo-insfx demo-tape demo-amp demo-livein demo-chop bundle-tool fuzz-fmt test-lib-san
 # the format registry's fuzz target (tests/fuzz_fmt.cpp; docs/LIBRARY.md "Tests"): libFuzzer + ASan + UBSan with
 # Homebrew's clang (FUZZ_CXX; brew install llvm) for FUZZ_SECS seconds (default 60) from the golden files; without it
 # the same target under ASan + UBSan with its own driver (FUZZ_RUNS mutated inputs, default 200000)
@@ -52,6 +52,13 @@ fuzz-fmt:
 	  $(CXX) $(FUZZ_FLAGS) -fsanitize=address,undefined -DFUZZ_STANDALONE -o $(B)/fuzz/fuzz_fmt $(FUZZ_SRC) && \
 	  ./$(B)/fuzz/fuzz_fmt tests/golden $(or $(FUZZ_RUNS),200000); \
 	fi
+# the library walk's depth test (tests/test_library_depth.cpp) with library.cpp and the test under ASan + UBSan: a plain
+# build does not see an out-of-bounds close of the walk's level table, the sanitizers do (the rest are the plain objects)
+SAN_DIR := $(B)/san
+test-lib-san: $(CORE_OBJ) $(DEPS_H) $(B)/libengines.a
+	@mkdir -p $(SAN_DIR)
+	$(CXX) $(CXXFLAGS) -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -Itests -o $(SAN_DIR)/test_library_depth tests/test_library_depth.cpp lib/library.cpp $(filter-out $(B)/obj/lib/library.o,$(CORE_OBJ)) $(B)/libengines.a
+	./$(SAN_DIR)/test_library_depth
 # WAVETABLE's and GRANULAR's demo renders (tests/demo/render_wavegrain.cpp) into OUT (default build/)
 demo-wavegrain: $(B)/render_wavegrain
 	./$(B)/render_wavegrain $(or $(OUT),$(B))
