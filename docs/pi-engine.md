@@ -217,7 +217,7 @@ Each file is written whole (a `.tmp` file, then a rename), and nothing that exis
 
 ### Lag diagnostics (the black box, `pi/engine/lagdiag.h`)
 
-For a Rytm that feels laggy while no Sidecar counter moves (the 2026-11-20 black box analysis). Everything here goes into the log, so the black box keeps it. Nothing is added to the Rytm's mods.
+For a Rytm that feels laggy while no Sidecar counter moves (the 2026-11-20 black box analysis). Everything here goes into the log, so the black box keeps it. Size: `rxrep` and `txacc` are each up to a line a second (about 150 bytes with the log prefix) while the Rytm modulates or the remote UI draws, on top of the ~1 KB/s the other lines make: about 30 % more log lines, so the 8 MB black box file rotates a little sooner (about every 1.5 h instead of 2 h) and the 32 KB crumb ring holds about 23 s instead of ~30 s (the writer waits up to 10 s for the SD's streams, so it is still safe). Nothing is added to the Rytm's mods.
 
 **Lag now (`lagnow`).** A button in the web app (the header on every page, so it is within reach while playing, and Settings > About) sends the console command `lagnow`. The Sidecar answers with two log lines:
 
@@ -228,7 +228,7 @@ lag-snap: fifo min 71 under 411 | block max 17 us | cpu c1 5.3 c2 2.3 c3 11.9 % 
 
 - `lag-marker N at HH:MM:SS.cc`: N counts the markers since the boot; the time is the Sidecar's uptime, the same clock as the log's time stamps. One marker a second at most (a held or double-tapped button is one); the page keeps the same rule.
 - `lag-snap`: the last `engine:` line's per-second figures (FIFO minimum, `under` total, longest audio block, the cores' busy share, longest control pass, the Rytm's MIDI bytes and SysEx count, what was sent to the Rytm and dropped), so the marker and the counters of that second sit together. The last `rxrep` and `txacc` lines follow it as `| rx: ...` and `| tx: ...` when they are less than 5 s old (below).
-- The command is exactly `lagnow` and takes no argument; `lagnow=anything` is refused with a fixed warning, and no text from the client reaches the log. Like every console command it needs a paired browser (`POST /cmd`, `/ws` `cmd`); it runs on core 0, where the log lines are written.
+- The command is exactly `lagnow` and takes no argument; `lagnow=anything` is refused with a fixed warning (one a second at most) that does not repeat the text. The engine's own lines never contain client text; the web layer's generic `command :<text> (ws)` line (web.cpp) does, as it does for every command, so a client can still put its own text there. Like every console command it needs a paired browser (`POST /cmd`, `/ws` `cmd`); it runs on core 0, where the log lines are written.
 
 **The Rytm's report stream (`rxrep:`, once a second, only while a voice reports).** The Rytm sends its voices' parameters itself (03 PARAMS, 04 TRIG+PARAMS, the MIDI machine's 43 and 44), up to 94 a second a voice. No Pi counter shows the Rytm's own load, but a Rytm whose audio interrupt runs late sends these late. One line, the voices that reported only:
 
