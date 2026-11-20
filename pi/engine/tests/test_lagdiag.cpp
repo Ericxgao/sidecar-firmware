@@ -319,9 +319,59 @@ static void tx_tests() {
   CHECK(len == strlen(b) && len < lagdiag::kLine);
 }
 
+// ---- the review's fixes (H1, M1, L4)
+static void rx_fix_tests() {
+  using lagdiag::RxDiag;
+  RxDiag::Second s;
+  std::vector<unsigned> w = zeros(16);
+  // H1: the control loop's order. A pass stamps its start, handles its messages (stamped later), then ticks. The tick's time
+  // is before the message that opened the second: that must not close the second (an unsigned underflow once did).
+  RxDiag a;
+  feed(a, 1000040, report(0x03, 5, w));
+  a.tick(1000000);   // the pass start, 40 us before the message
+  CHECK(!a.take(&s));
+  // the whole loop: a pass every 150 us, a voice-5 report every 10.7 ms handled 40 us into its pass, tick with the pass start
+  RxDiag b;
+  uint64_t next = 0;
+  unsigned reports = 0;
+  for (uint64_t t0 = 5000000; t0 < 7600000; t0 += 150) {
+    if (t0 >= 5000000 + next && reports < 400) {
+      feed(b, t0 + 40, report(0x03, 5, w));
+      ++reports;
+      next += 10700;
+    }
+    b.tick(t0);
+  }
+  CHECK(b.take(&s));
+  CHECK(s.n[5] >= 90 && s.n[5] <= 95 && s.gap_us[5] >= 10600 && s.gap_us[5] <= 11000 && s.sx_n == s.n[5]);
+
+  // M1: the voice with the longest gap is on the line first, whatever its number, and is never one of the "+N more"
+  RxDiag::Second x = {};
+  for (unsigned v = 0; v < 8; ++v) x.n[v] = 94, x.gap_us[v] = 10000 + v, x.mask[v] = 0xffff;
+  x.gap_us[6] = 250000;
+  x.sx_n = 700, x.sx_max_us = 12000, x.sx_jit_us = 300;
+  char bf[lagdiag::kLine + 8];
+  lagdiag::fmt_rx(bf, lagdiag::kLine, x);
+  CHECK(std::string(bf).find("rxrep: v6 n94 gap250000us") == 0);
+  CHECK(std::string(bf).find("more") != std::string::npos && strlen(bf) < lagdiag::kLine);
+
+  // L4: the Rytm went away: its words are not compared with the next report (no spurious changed bits)
+  RxDiag c;
+  feed(c, 1000000, report(0x03, 2, w));
+  c.forget();
+  std::vector<unsigned> w2 = w;
+  w2[5] = 99;
+  feed(c, 1010000, report(0x03, 2, w2));
+  feed(c, 1020000, report(0x03, 2, w2));
+  c.tick(2100000);
+  CHECK(c.take(&s));
+  CHECK(s.n[2] == 3 && s.mask[2] == 0 && s.gap_us[2] == 10000);
+}
+
 int main() {
   marker_tests();
   rx_tests();
+  rx_fix_tests();
   tx_tests();
   printf("test_lagdiag: PASS\n");
   return 0;

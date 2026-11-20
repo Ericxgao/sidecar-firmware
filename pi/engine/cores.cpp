@@ -500,7 +500,7 @@ void CEngineCores::Control (void)
 			bWorked = TRUE;
 		}
 		Mark (0);
-		s_Rx.tick (TicksToUs (t0));	// a second of the report stream ends here too
+		s_Rx.tick (TicksToUs (Ticks ()));	// a second of the report stream ends here too (now: the messages above were stamped after t0)
 		u32 nKey;
 		while (g_KeysIn.pop (&nKey))
 		{
@@ -516,7 +516,7 @@ void CEngineCores::Control (void)
 		}
 		Mark (2);
 		Drone ();
-		if (g_bRytmGone) { g_bRytmGone = false; bridge::rytm_gone (); }
+		if (g_bRytmGone) { g_bRytmGone = false; bridge::rytm_gone (); s_Rx.forget (); }
 		bridge::rytm_link (!g_bRytmOff);
 		if (g_bRytmResync) { g_bRytmResync = false; bridge::rytm_resync (); }
 		bridge::tick ();

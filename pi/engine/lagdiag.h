@@ -159,6 +159,13 @@ class RxDiag {
   // The control core's pass: a second without a message ends too
   void tick(uint64_t now_us) { roll_if_due(now_us); }
 
+  // The Rytm went away (core 3, with bridge::rytm_gone): its parameter words and report times are not compared with the next
+  // ones after it comes back
+  void forget() {
+    for (Voice& v : voice_) v.known = 0, v.seen = false;
+    sx_seen_ = iv_seen_ = false;
+  }
+
   // Core 0: the newest second not taken yet, true if there is one. Only seconds with a report in them are ever published.
   bool take(Second* out) {
     uint32_t s1 = __atomic_load_n(&seq_, __ATOMIC_ACQUIRE);
@@ -182,7 +189,8 @@ class RxDiag {
   };
 
   void roll_if_due(uint64_t now_us) {
-    if (open_ && now_us - start_ >= kSecondUs) roll();
+    // (a time not after start_ is a pass that stamped its start before the message that opened the second: not a second)
+    if (open_ && now_us > start_ && now_us - start_ >= kSecondUs) roll();
   }
   void roll() {
     bool active = false;
@@ -210,7 +218,7 @@ class RxDiag {
 };
 
 // "rxrep: v5 n94 gap10700us m0003 | v6 n93 gap10900us m0ff0 | sx n121 max11200us jit410us": the voices that reported only, the gap
-// and the changed-words mask (hex, P1 = bit 0) of each, then every SysEx's figures. Capped to max bytes (and kLine by the caller's
+// and the changed-words mask (hex, P1 = bit 0) of each (the longest gap first), then every SysEx's figures. Capped to max bytes (and kLine by the caller's
 // choice of max): voices that do not fit are left out and counted as "+N more".
 inline unsigned fmt_rx(char* out, unsigned max, const RxDiag::Second& x) {
   if (max == 0) return 0;
@@ -218,8 +226,16 @@ inline unsigned fmt_rx(char* out, unsigned max, const RxDiag::Second& x) {
   unsigned sxn = cut(sx, sizeof sx, LAGDIAG_FMT(sx, sizeof sx, " | sx n%u max%uus jit%uus", x.sx_n, x.sx_max_us, x.sx_jit_us));
   unsigned n = cut(out, max, LAGDIAG_FMT(out, max, "rxrep:"));
   unsigned left = 0;
+  // the voices that reported, the longest gap first (a stable order: equal gaps by voice), so a cut never hides the late one
+  unsigned order[RxDiag::kVoices], k = 0;
   for (unsigned v = 0; v < RxDiag::kVoices; ++v) {
     if (x.n[v] == 0) continue;
+    unsigned j = k++;
+    for (; j > 0 && x.gap_us[order[j - 1]] < x.gap_us[v]; --j) order[j] = order[j - 1];
+    order[j] = v;
+  }
+  for (unsigned i = 0; i < k; ++i) {
+    const unsigned v = order[i];
     char item[56];
     unsigned in = cut(item, sizeof item, LAGDIAG_FMT(item, sizeof item, " %sv%u n%u gap%uus m%04x", n > 6 ? "| " : "", v, x.n[v], x.gap_us[v], x.mask[v] & 0xFFFF));
     if (left || n + in + 12 + sxn >= max) {   // (12: " | +N more")

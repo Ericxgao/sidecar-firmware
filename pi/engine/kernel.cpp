@@ -143,7 +143,7 @@ private:
 static const char RebootMagic[] = "RYTM-REBOOT";
 static volatile boolean s_bRebootRequested = FALSE;
 static void RebootRequest (void) { s_bRebootRequested = TRUE; }   // UART IRQ: core 0's loop stops cleanly first
-static lagdiag::Marker s_LagMarker;	// "Lag now" (lagnow): core 0 only
+static lagdiag::Marker s_LagMarker, s_LagWarn;	// "Lag now" (lagnow): core 0 only
 static lagdiag::Snap s_LagSnap;		// the last second's figures for the marker's snapshot (LogStats, core 0)
 static unsigned s_nLagRxAt, s_nLagTxAt;	// when s_LagSnap.rx / .tx were set (m_Timer ticks)
 static unsigned s_nMidiInLost;		// the Rytm's USB MIDI bytes lost: a full g_MidiIn (the stats line's "lost")
@@ -1232,13 +1232,14 @@ boolean CKernel::Core0Command (const char *pCmd, void *pParam)
 	{
 		if (!lagdiag::is_marker_cmd (pCmd))			// (an argument: refused, and never copied into the log)
 		{
-			pThis->m_Logger.Write (From, LogWarning, "lagnow takes no argument");
+			if (s_LagWarn.press (pThis->m_Timer.GetTicks () * (1000 / HZ)))	// (one a second: a client cannot flood the log with it)
+				pThis->m_Logger.Write (From, LogWarning, "lagnow takes no argument");
 			return TRUE;
 		}
 		unsigned nMs = pThis->m_Timer.GetTicks () * (1000 / HZ);
 		unsigned n = s_LagMarker.press (nMs);
 		if (n == 0) return TRUE;				// a second has not passed since the last
-		char Line[lagdiag::kLine + 200];
+		char Line[3 * lagdiag::kLine + 64];		// (the snapshot, with the two lines it may carry)
 		lagdiag::fmt_marker (Line, sizeof Line, n, nMs);
 		pThis->m_Logger.Write (From, LogNotice, "%s", Line);
 		if (pThis->m_Timer.GetTicks () - s_nLagRxAt > 5 * HZ) s_LagSnap.rx[0] = 0;	// the stream line only while it is fresh
