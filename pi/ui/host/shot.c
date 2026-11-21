@@ -1606,6 +1606,11 @@ static void theme_run (int style, const char *pre)
 	tap (wlx, WG_BOX (5, 3)); EXPECT_CMD ("pool=smp:accept:A005");
 	tap (WG_SRC_X, WG_KY);			// DONE: back
 	EXPECT (sidecar_ui_page () == 7 && !sidecar_wgview_pool_page_shown () && !sidecar_wgview_list_shown ());
+	// the machine view's ALL POOLS, its JUNO tab (the PRESET page), DONE: back to the machine view (page 7), not POOL
+	tap (WG_MID_X, WG_KY); EXPECT (sidecar_ui_page () == 15 && sidecar_wgview_pool_page_shown ());
+	tap (tx0 + 3 * tw5 + tw5 / 2, WG_ROW (0)); EXPECT (sidecar_ui_page () == 18);
+	tap (WG_SRC_X, WG_KY);			// DONE
+	EXPECT (sidecar_ui_page () == 7);
 	sidecar_ui_show (1); run (2);
 	tap_raw (SUBX (6, 3), SUBY);	// Settings > Pool (the 4th of 6 pills)
 	EXPECT (sidecar_ui_page () == 15 && sidecar_wgview_pool_page_shown ());
@@ -1618,6 +1623,16 @@ static void theme_run (int style, const char *pre)
 	tap_raw (SUBX (6, 3), SUBY); EXPECT (sidecar_ui_page () == 15 && sidecar_wgview_pool_page_shown ());
 	tap (WG_SRC_X, WG_KY);			// DONE
 	EXPECT (sidecar_ui_page () == 1);
+	// from the machine view: ALL POOLS, JUNO, then the SET key (its remembered pill is Pool: POOL again from PRESET), DONE:
+	// the machine view (page 7), not PRESET. (Settings > Pool first: it makes Pool the SET key's remembered pill)
+	tap_raw (SUBX (6, 3), SUBY); EXPECT (sidecar_ui_page () == 15);
+	sidecar_ui_show (7); run (2);
+	tap (WG_MID_X, WG_KY); EXPECT (sidecar_ui_page () == 15);
+	tap (tx0 + 3 * tw5 + tw5 / 2, WG_ROW (0)); EXPECT (sidecar_ui_page () == 18);
+	if (o) tap_raw (NAV_X, NAV_Y (7)); else tap_raw (CNAV_X (7), CNAV_Y (7));
+	EXPECT (sidecar_ui_page () == 15 && sidecar_wgview_pool_page_shown ());
+	tap (WG_SRC_X, WG_KY);			// DONE
+	EXPECT (sidecar_ui_page () == 7);
 	// the POOL page's JUNO / 6-OP tabs: the preset pages (sidecar_preset.c). The JUNO list, a slot's menu (REPLACE), the
 	// index aimed at the slot (a folder, a preset: preset=juno:set:..), an empty slot, ADD (the first empty slot), the FM
 	// list holding the built-ins, the index scrolled, the tabs back to the pool lists
