@@ -46,6 +46,12 @@ sed -i '' 's|^#include "plaits/resources.h"$|#include "plaits/resources.h"\n#inc
 perl -0pi -e 's|(void SixOpEngine::LoadUserData\(const uint8_t\* user_data\) \{\n)|$1  if (user_data \&\& user_data == fm_user_bank()) {   // rytm: one voice, into patch fm_user_slot()\n    fm::Patch* target = \&patches_[fm_user_slot() \& 1];\n    target->Unpack(user_data);\n    for (int i = 0; i < kNumSixOpVoices; ++i) {\n      if ((fm_user_slot() \& 2) ? true : voice_[i].patch() == target) voice_[i].UnloadPatch();\n    }\n    return;\n  }\n|' "$S"
 grep -q 'rytm: one voice, into patch fm_user_slot()' "$S" || { echo "six_op_engine.cc: patch failed"; exit 1; }
 cp "$D/../sim/plaits/fm_machine.h" "$L/src/fm_machine.h"
+# SPEECH's word banks: stock Plaits scans a bank continuously when HARM changes the bank (or returns from the
+# phonemes) with no word playing, and with a trigger patched (the voices always patch it) SpeechEngine's
+# already_enveloped bypasses the LPG: a drone after the note off, its level moving with HARM. No word, no sound.
+# Behaviour change: a word already playing is cut when HARM moves to another bank (stock turned that into the drone).
+perl -0pi -e 's|(  if \(playback_frame_ == -1 && remaining_frame_samples_ == 0\) \{\n)|  if (bank != -1 && !free_running && playback_frame_ == -1) {   // rytm: a bank with no word to play is silent\n    fill(&sample_[0], &sample_[2], 0.0f);\n    fill(&next_sample_[0], &next_sample_[2], 0.0f);\n    fill(excitation, excitation + size, 0.0f);\n    fill(output, output + size, 0.0f);\n    return;\n  }\n$1|' "$L/src/plaits/dsp/speech/lpc_speech_synth_controller.cc"
+grep -q 'rytm: a bank with no word to play is silent' "$L/src/plaits/dsp/speech/lpc_speech_synth_controller.cc" || { echo "lpc_speech_synth_controller.cc: patch failed"; exit 1; }
 # The FM operators' NEON path on AArch64 (sim/plaits/operator_neon.h, inside plaits::fm, after the C renamed RenderOperatorsC)
 O="$L/src/plaits/dsp/fm/operator.h"
 cp "$D/../sim/plaits/operator_neon.h" "$L/src/plaits/dsp/fm/operator_neon.h"
