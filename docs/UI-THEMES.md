@@ -502,7 +502,7 @@ where the code is the trig number and nothing else hard-codes a key, so no `.syx
 | UP + | what | older form (still works) |
 |---|---|---|
 | T1..T4 | the touchscreen's HOME, SEQ, PAT, VOICE | |
-| T5 | the touchscreen's FX: Send FX, as the sidebar's FX key (INSERT FX before 0.5.2) | |
+| T5 | the touchscreen's FX: Send FX, as the sidebar's FX key (INSERT FX before 0.5.1.1) | |
 | T6, T7 | SONG, REC (the touchscreen's when it has them, else the Rytm's screen) | |
 | T8 | the touchscreen's SET | |
 | T9, T10 | SCOPE, the Sidecar's STATUS (the same rule as T6 / T7) | |
