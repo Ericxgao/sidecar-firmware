@@ -153,6 +153,92 @@ static void test_burst_merges() {   // no cover: 10 changes between two ticks ar
   CHECK(count().commits >= 1);
 }
 
+static void test_cover_clock() {   // a 2B handled after the tick's ms was taken: the stamp is not later than that ms (no underflow)
+  start();
+  const uint32_t ms0 = now_ms();
+  g_us += 30000, host_fake_time(true, g_us);   // time passes between taking ms and the Rytm's 2B
+  list_open();
+  remote_tick(ms0);
+  remote_tick(ms0 + 30);
+  CHECK(count().commits == 0);   // still covered, not ended at once
+}
+
+static void test_29_off_clears_cover() {   // the view left while covered: the next 29 on is not held back by the old cover
+  start();
+  list_open();
+  tick(2);
+  count();
+  src_view(0);
+  src_view(1);
+  tick(4);
+  Count c = count();
+  CHECK(c.commits == 1 && c.rects > 0);
+}
+
+static void test_hello_clears_cover() {   // a new link: the Rytm says 29 and 2B again; a stale cover must not hold the view
+  start();
+  list_open();
+  tick(2);
+  count();
+  from_rytm({0x35, 1, 0, 5, 0});   // hello
+  src_view(1);
+  tick(4);
+  Count c = count();
+  CHECK(c.commits >= 1);
+}
+
+static void test_late_heartbeat() {   // a 2B late by 4 s: one frame, then covered again and silent
+  start();
+  list_open();
+  tick(2);
+  count();
+  tick(135);   // 4 s
+  CHECK(count().commits == 1);
+  list_open();
+  tick(20);
+  CHECK(count().commits == 0);
+}
+
+static void test_track_change_covered() {   // another track's view comes up under the cover: silent until the cover ends, then one frame
+  start();
+  list_open();
+  tick(2);
+  count();
+  from_rytm({0x33, 1, 1, 1, 44, 0});   // track 1 on a PLAITS, its view up
+  from_rytm({0x29, 1, 1, 1});
+  tick(10);
+  CHECK(count().commits == 0);
+  list_gone();
+  tick(4);
+  Count c = count();
+  CHECK(c.commits == 1 && c.rects > 0);
+}
+
+static void test_real_vtable() {   // the real MachineListView vtable words (OS 1.74) in the 2B: covered, one frame at the end
+  start();
+  from_rytm({0x2B, 1, 3, 9, 4, 0, 121, 61, 36, 0});   // vt 0x401E5EA4
+  tick(2);
+  count();
+  browse(10);
+  tick(5);
+  CHECK(count().commits == 0);
+  list_gone();
+  tick(3);
+  CHECK(count().commits == 1);
+}
+
+static void test_open_page_cover_end() {   // a Sidecar page open: a cover ending under it does not resend the page
+  start();
+  from_rytm({0x30, 1, 0, 1, 0});   // the page opens
+  tick(8);
+  count();
+  list_open();
+  tick(3);
+  list_gone();
+  tick(3);
+  CHECK(count().rects == 0);
+}
+
 int main() {
   char tmpl[] = "/tmp/core_ml_frames_XXXXXX";
   CHECK(mkdtemp(tmpl));
@@ -163,7 +249,9 @@ int main() {
   CHECK(engine_begin());
   struct { const char* name; void (*fn)(); } tests[] = {{"before_cover_draws", test_before_cover_draws}, {"covered_silent", test_covered_silent},
       {"cover_ends_chosen", test_cover_ends_chosen}, {"cover_ends_cancelled", test_cover_ends_cancelled},
-      {"cover_end_lost", test_cover_end_lost}, {"burst_merges", test_burst_merges}};
+      {"cover_end_lost", test_cover_end_lost}, {"cover_clock", test_cover_clock}, {"29_off_clears_cover", test_29_off_clears_cover},
+      {"hello_clears_cover", test_hello_clears_cover}, {"late_heartbeat", test_late_heartbeat}, {"track_change_covered", test_track_change_covered},
+      {"real_vtable", test_real_vtable}, {"open_page_cover_end", test_open_page_cover_end}, {"burst_merges", test_burst_merges}};
   for (auto& t : tests) printf("-- %s\n", t.name), fflush(stdout), t.fn();
   remote_reset();
   rytm_dump::set_playing(false);

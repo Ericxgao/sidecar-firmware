@@ -1062,7 +1062,7 @@ CORE_COLD void cover_ended() {
   s.covered = false, s.sent_valid = false, s.page_changed = true, s.input = true;
 }
 CORE_COLD bool src_covered(uint32_t ms) {
-  if (s.covered && ms - s.cover_ms >= kCoverMs) cover_ended();
+  if (s.covered && (int32_t)(ms - s.cover_ms) >= (int32_t)kCoverMs) cover_ended();   // (signed: a stamp after ms is not over)
   return s.covered;
 }
 
@@ -1883,7 +1883,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         s.src_told = -1;   // a whole frame at the next tick: the Rytm shows ours only after a 39 since this 29
         s.src_last = -1;   // a splash running (a hello just before) ends first, then the view's whole frame
       } else if (b[0] == s.src_track) {
-        s.src_track = -1, s.src_told = -1;
+        s.src_track = -1, s.src_told = -1, s.covered = false;
         if (!s.open) s.sent_valid = false;   // the Rytm's own screen is back: its shadow is not ours
       }
       return;
@@ -1892,8 +1892,11 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
       static uint32_t last = 0xFFFFFFFFu;
       const bool st_cov = b[0] & 2;
       uint32_t vt = (uint32_t)b[2] << 28 | (uint32_t)b[3] << 21 | (uint32_t)b[4] << 14 | (uint32_t)b[5] << 7 | b[6];
-      if (st_cov) s.covered = true, s.cover_ms = now_ms();
-      else if (s.covered) cover_ended();
+      if (st_cov) s.covered = true, s.cover_ms = s.now_ms;   // (the tick's clock, as src_covered's)
+      else if (s.covered) {
+        if (s.open) s.covered = false;   // a Sidecar page is up: nothing of the SRC view to redraw
+        else cover_ended();
+      }
       machine_list(vt == kMachineListVt173 || vt == kMachineListVt174);   // rc5: the list's choice gets page 2's defaults once it closes
       uint32_t key = (uint32_t)b[0] << 24 ^ vt ^ (uint32_t)b[1] << 16;
       if (key == last && !src_log) return;
@@ -2073,6 +2076,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
     case kHello: {   // 1023: <uptime >> 7> <uptime & 0x7F> <caps>: the splash when the Rytm was up before the link
       s.presets_told = false;
       s.mlist = false, page_two_cancel();   // rc5: a new link: no list choice owed
+      s.covered = false;   // (the Rytm's 2B says again)
       if (n < 3) break;
       s.stats.hellos++;
       int up = b[0] << 7 | b[1];
