@@ -107,6 +107,18 @@ describe("previews", () => {
   it("keeps good items with the URL resolved against the registry and encoded", () => {
     expect(get([pv(F)])).toEqual([{ name: "01 Acid line", url: CAT_BASE + "machines/x.one/1.0.0/preview/01%20Acid%20line.mp3", bytes: 193743 }]);
   });
+  it("encodes names with # and +, and enforces the minimum size", () => {
+    const f = "machines/x.one/1.0.0/preview/a#b+c (d).mp3";
+    expect(get([pv(f, { name: "a#b+c (d)" })])![0].url).toBe(CAT_BASE + "machines/x.one/1.0.0/preview/a%23b%2Bc%20(d).mp3");
+    expect(get([pv(F, { bytes: 255 })])).toEqual([]);
+    expect(get([pv(F, { bytes: 256 })])!.length).toBe(1);
+    expect(get([pv(F, { bytes: 2 << 20 })])!.length).toBe(1);
+    expect(get([pv(F, { bytes: (2 << 20) + 1 })])).toEqual([]);
+  });
+  it("a blank name is dropped, a repeated file is listed once", () => {
+    expect(get([pv(F, { name: "" }), pv(F, { name: "   " })])).toEqual([]);
+    expect(get([pv(F), pv(F, { name: "again" })])!.length).toBe(1);
+  });
   it("an entry without previews is unchanged", () => {
     expect(get(undefined)).toEqual([]);
     expect(get("nope")).toEqual([]);

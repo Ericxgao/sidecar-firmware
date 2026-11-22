@@ -51,13 +51,15 @@ export function previewUrl(f: unknown): string {
 }
 /** The index's previews: at most 8, bad items dropped (the entry stays). */
 function catPreviews(p: unknown): CatPreview[] {
-  const out: CatPreview[] = [];
+  const out: CatPreview[] = [], seen = new Set<string>();
   if (!Array.isArray(p)) return out;
   for (const x of p) {
     if (out.length >= CAT_MAX_PREVIEWS) break;
     if (!x || typeof x !== "object" || typeof x.name !== "string" || !Number.isInteger(x.bytes) || x.bytes < 256 || x.bytes > 2 << 20) continue;
-    const url = previewUrl(x.file);
-    if (url) out.push({ name: clip(x.name, 40), url, bytes: x.bytes });
+    const url = previewUrl(x.file), name = clip(x.name, 40).trim();
+    if (!url || !name || seen.has(url)) continue; // a blank name or a repeated file is dropped
+    seen.add(url);
+    out.push({ name, url, bytes: x.bytes });
   }
   return out;
 }

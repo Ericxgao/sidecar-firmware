@@ -7,7 +7,7 @@ import Card from "../../ui/Card.vue";
 import { useSidecar } from "../../lib/useSidecar";
 import { confirmAsk } from "../../lib/confirm";
 import { uploadFile } from "../../lib/upload";
-import { PreviewPlayer, type PreviewState } from "../../lib/preview";
+import { PreviewPlayer, idleState, type PreviewState } from "../../lib/preview";
 import { CAT_BASE, boardOf, catAsk, catFileName, catShown, catState, fetchPackage, loadIndex, type CatEntry } from "../../lib/catalog";
 
 const props = defineProps<{ installed: { [k: string]: any }[] }>();
@@ -27,18 +27,20 @@ const total = computed(() => entries.value.filter((e) => !board.value || e.board
 const rows = computed(() => shown.value.map((e) => ({ e, st: catState(e, props.installed) })));
 
 // previews: one shared player (src/lib/preview.ts), streamed from the registry's site by this browser; nothing loads until play
-const pv = ref<PreviewState>({ url: "", playing: false, pos: 0, time: "0:00", error: "" });
+const pv = ref<PreviewState>(idleState());
 const player = new PreviewPlayer(undefined, (s) => (pv.value = s));
 const opened = ref<{ [k: string]: boolean }>({});
 const key = (e: CatEntry) => `${e.id}/${e.board}`;
+const trackKey = (e: CatEntry, url: string) => `${key(e)}|${url}`; // pi4 and pi5 rows of one id share URLs
 function togglePreviews(e: CatEntry) {
   const open = !opened.value[key(e)];
   opened.value = { ...opened.value, [key(e)]: open };
-  if (!open && e.previews.some((p) => p.url === pv.value.url)) player.stop();
+  if (!open && pv.value.key.startsWith(`${key(e)}|`)) player.stop();
 }
 watch([kind, q, board, entries], () => player.stop()); // the list changes: nothing keeps playing
-onUnmounted(() => player.stop());
-if (typeof window !== "undefined") window.addEventListener("pagehide", () => player.stop());
+const leave = () => player.stop();
+onMounted(() => window.addEventListener("pagehide", leave));
+onUnmounted(() => { window.removeEventListener("pagehide", leave); player.stop(); });
 
 async function load() {
   loading.value = true;
@@ -96,7 +98,7 @@ async function install(e: CatEntry, file?: string) {
       </p>
       <p v-else-if="!loading && !rows.length" class="small">Nothing matches.</p>
       <ul class="cat">
-        <li v-for="{ e, st } in rows" :key="`${e.id}/${e.board}`">
+        <li v-for="({ e, st }, n) in rows" :key="`${e.id}/${e.board}`">
           <div class="h">
             <b>{{ e.name || e.id }}</b>
             <span class="tag">{{ e.short }}</span>
@@ -113,20 +115,20 @@ async function install(e: CatEntry, file?: string) {
           </div>
           <div class="desc">{{ e.description }}</div>
           <div v-if="e.previews.length" class="pv">
-            <button type="button" :aria-expanded="!!opened[`${e.id}/${e.board}`]" :aria-controls="`pv-${e.id}-${e.board}`" @click="togglePreviews(e)">Previews ({{ e.previews.length }})</button>
-            <ul v-show="opened[`${e.id}/${e.board}`]" :id="`pv-${e.id}-${e.board}`" class="tracks">
+            <button type="button" :aria-expanded="!!opened[key(e)]" :aria-controls="`pv-${n}`" @click="togglePreviews(e)">Previews ({{ e.previews.length }})</button>
+            <ul v-show="opened[key(e)]" :id="`pv-${n}`" class="tracks">
               <li v-for="p in e.previews" :key="p.url">
-                <button type="button" :aria-pressed="pv.playing && pv.url === p.url" :aria-label="`${pv.playing && pv.url === p.url ? 'Pause' : 'Play'} ${p.name}`" @click="player.toggle(p.url)">{{ pv.playing && pv.url === p.url ? "Pause" : "Play" }}</button>
+                <button type="button" :aria-label="`${player.isPlaying(trackKey(e, p.url)) ? 'Pause' : 'Play'} ${p.name}`" @click="player.toggle(trackKey(e, p.url), p.url)">{{ pv.key === trackKey(e, p.url) && pv.playing ? "Pause" : "Play" }}</button>
                 <span class="tname">{{ p.name }}</span>
-                <input type="range" min="0" max="1000" step="1" :value="pv.url === p.url ? pv.pos : 0" :aria-label="`Position in ${p.name}`" :aria-valuetext="pv.url === p.url ? pv.time : '0:00'"
-                  @input="player.seek(p.url, +($event.target as HTMLInputElement).value)" />
-                <span class="small clk">{{ pv.url === p.url ? pv.time : pv.error && !pv.url ? "" : "0:00" }}</span>
+                <input type="range" min="0" max="1000" step="1" :disabled="pv.key !== trackKey(e, p.url)" :value="pv.key === trackKey(e, p.url) ? pv.pos : 0" :aria-label="`Position in ${p.name}`"
+                  :aria-valuetext="pv.key === trackKey(e, p.url) ? pv.time : '0:00'" @input="player.seek(trackKey(e, p.url), +($event.target as HTMLInputElement).value)" />
+                <span class="small clk" :class="{ warm: pv.errKey === trackKey(e, p.url) }" role="status">{{
+                  pv.errKey === trackKey(e, p.url) ? pv.error : pv.key !== trackKey(e, p.url) ? "0:00" : pv.loading ? "loading…" : pv.time }}</span>
               </li>
             </ul>
           </div>
         </li>
       </ul>
-      <p v-if="pv.error" class="small warm" role="status">Preview: {{ pv.error }} (it streams from the registry's site: this browser needs internet).</p>
       <p v-if="msg" class="small" :class="{ warm: bad }" role="status">{{ msg }}</p>
       <p class="small">The list comes from the community registry, read by this browser: the Pi itself never goes to the internet. A download is checked against its SHA-256 before it is sent to the Pi, which checks the package again as for any upload.</p>
     </template>
@@ -146,7 +148,7 @@ async function install(e: CatEntry, file?: string) {
 .cat .tracks li { border: 0; padding: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.25rem 0.5rem; }
 .tname { overflow-wrap: anywhere; }
 .tracks input[type="range"] { grid-column: 1 / 3; grid-row: 2; min-width: 0; width: 100%; }
-.clk { grid-column: 3; grid-row: 2; min-width: 5.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.clk { grid-column: 3; white-space: nowrap; grid-row: 2; min-width: 5.5rem; text-align: right; font-variant-numeric: tabular-nums; }
 @media (min-width: 40rem) {
   .cat .tracks li { grid-template-columns: auto minmax(8rem, 1fr) minmax(8rem, 2fr) auto; }
   .tracks input[type="range"] { grid-column: 3; grid-row: 1; }
