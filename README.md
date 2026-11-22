@@ -38,7 +38,7 @@ docs/remote-ui.md), and a fix for a USB-C cable pulled in the middle of traffic.
 the Rytm's own parameters on the XY pad, MIDI learn and poly-track p-locks, A and B LFOs, user send effects, the MIST texture machine,
 the new web page (web-next), updating from the web page and SD card images. MORPH, the looper, sidechain, the MIDI page's learn
 rows and a new WAVETABLE come in 0.5.2.
-The release notes have each item's status: <https://trigcondition.github.io/sidecar-expander/release-notes/#sidecar-05110>.
+The release notes have each item's status: <https://trigcondition.github.io/sidecar-expander/release-notes/#sidecar-0511>.
 
 - Release and binaries: <https://github.com/trigcondition/sidecar-firmware/releases/tag/v0.5.1.1> (the update file,
   the SD card images, the Pi card files, the user machines and effects, the starter content, the release zip); 0.1.0 and
