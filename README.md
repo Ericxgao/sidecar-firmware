@@ -29,7 +29,7 @@ side has two small elemod files to flash (the Pi 0.5.1.1 also runs with the Rytm
   survive the Rytm repeating its project report; SPACE has no runaway hiss before the tape has heard a signal; the library
   walk no longer writes past its level table at 12 folder levels deep.
 - **Versions** may have a fourth number: the update check and the web page's version note read it (0.5.1 < 0.5.1.1 < 0.5.2);
-  plugins and the catalog stay with three numbers (a plugin sees 0.5.1.1 as 0.5.1; docs/versioning.md).
+  plugins and the catalog keep three numbers (docs/versioning.md).
 
 Sidecar 0.5.1 added the new touchscreen themes (SIDECAR in the GRID layout language, GRID, and the contrast options High blue,
 High green and Viper) with sections and sub-page rows, HOME as Overview and Perform, bigger touch targets and touch controls, the
@@ -38,7 +38,7 @@ docs/remote-ui.md), and a fix for a USB-C cable pulled in the middle of traffic.
 the Rytm's own parameters on the XY pad, MIDI learn and poly-track p-locks, A and B LFOs, user send effects, the MIST texture machine,
 the new web page (web-next), updating from the web page and SD card images. MORPH, the looper, sidechain, the MIDI page's learn
 rows and a new WAVETABLE come in 0.5.2.
-The release notes have each item's status: <https://trigcondition.github.io/sidecar-expander/release-notes/#sidecar-051>.
+The release notes have each item's status: <https://trigcondition.github.io/sidecar-expander/release-notes/#sidecar-05110>.
 
 - Release and binaries: <https://github.com/trigcondition/sidecar-firmware/releases/tag/v0.5.1.1> (the update file,
   the SD card images, the Pi card files, the user machines and effects, the starter content, the release zip); 0.1.0 and

@@ -7,7 +7,7 @@ The Sidecar (the Pi 4 "Sidecar" and the Teensy 4.1 "Sidecar Mini", one shared co
   and 0.5.2): a fixes-only release between two PATCH releases. Order: 0.5.1 < 0.5.1.1 < 0.5.2; no 4th number means 0 (0.5.1 is
   0.5.1.0), and a pre-release (`-rc1`) is below its release. The update check (the engine and the web page), `tools/make_update.py`, `tools/gen_version.sh` and
   the web page's build note read it. **Plugins stay three numbers**: a package's `version` and `compatible_from` are
-  `a.b.c` (three bytes) and the SDK and catalog have no 4th number; the host counts as its first three (0.5.1.1 is 0.5.1 to a plugin).
+  `a.b.c` (three bytes) and the SDK and catalog have no 4th number. `compatible_from` is checked package against package, not against the host version.
 - **MINOR**: new features (and, while MAJOR is 0, anything that changes how a setup behaves).
 - **MAJOR**: 1.0.0 follows the testers' feedback; after it, a MAJOR step means a break in how a setup is used.
 
