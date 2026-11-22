@@ -12,6 +12,10 @@ The catalog lists the user machines and effects of the community registry
   downgrade. A copy on the card that does not load shows **Reinstall**.
 - An update replaces the file already on the card for that machine (also one copied there by hand or from the plugins
   zip, such as `bp303.a64.rmp`); the confirm names the file it replaces. Install waits until the page knows the board.
+- An entry that has audio previews (the registry lists up to eight) has a **Previews** toggle with a player; nothing
+  plays by itself and nothing is fetched until you press play. The audio streams from the registry's site to your
+  browser (so it needs internet, like the rest of the catalog); the Sidecar never touches it. Only `https:` previews
+  under the registry's address are offered, and the player stops when you filter, close the list or leave the page.
 - Every entry is marked **community**. Entries by trigcondition also say **by Sidecar**; they are installed the same way.
 
 ## How it works: the browser does the fetching

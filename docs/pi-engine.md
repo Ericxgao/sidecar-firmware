@@ -217,6 +217,8 @@ Each file is written whole (a `.tmp` file, then a rename), and nothing that exis
 
 ### Lag diagnostics (the black box, `pi/engine/lagdiag.h`)
 
+**Download it from the web page (0.5.1.1):** Settings > About > **Download black box** saves one text file for a bug report: the last crashed boot's report (`prevboot.txt`, when there is one), `blackbox.1.log` (the previous file) and `blackbox.log`, under a header with the version, the commit and the board. The page reads them in 64 KB pieces over the paired connection (so the browser must be paired), follows a file that is still growing, and masks the pairing code, passwords and tokens before the file is offered. Save it before restarting the Sidecar. The same page's **Lag now** button writes a marker into the black box (below).
+
 For a Rytm that feels laggy while no Sidecar counter moves (the 2026-11-20 black box analysis). Everything here goes into the log, so the black box keeps it. Size: `rxrep` and `txacc` are each up to a line a second (about 150 bytes with the log prefix) while the Rytm modulates or the remote UI draws, on top of the ~1 KB/s the other lines make: about 30 % more log lines, so the 8 MB black box file rotates a little sooner (about every 1.5 h instead of 2 h) and the 32 KB crumb ring holds about 23 s instead of ~30 s (the writer waits up to 10 s for the SD's streams, so it is still safe). Nothing is added to the Rytm's mods.
 
 **Lag now (`lagnow`).** A button in the web app (the header on every page, so it is within reach while playing, and Settings > About) sends the console command `lagnow`. The Sidecar answers with two log lines:

@@ -1,7 +1,7 @@
 # Sidecar | Expander: firmware
 
-> **`dev` is the development branch: unstable, not a release.** It carries work after Sidecar 0.5.1 and can need matching
-> builds of both repos; flash at your own risk; keep your 0.5.1 firmware for rollback. Use `main` for a release. Pull
+> **`dev` is the development branch: unstable, not a release.** It carries work after Sidecar 0.5.1.1 and can need matching
+> builds of both repos; flash at your own risk; keep your 0.5.1.1 firmware for rollback. Use `main` for a release. Pull
 > requests go to `dev` (see CONTRIBUTING.md).
 
 The source of the Sidecar firmware: the engine that runs on a **Raspberry Pi 4B or Pi 5** on the USB port of an Analog
@@ -11,19 +11,36 @@ Pi 4B is the main target, and the one the measurements are made on; the Pi 5 sca
 > **Sidecar Mini (Teensy 4.1) is phased out.** It is frozen at 0.1.0: no new features. Its source stays in `teensy/`
 > and in the history (commit `101a3fb`) for reference, and the 0.1.0 release stays downloadable.
 
-This repository holds the source of **Sidecar 0.5.1**, an update for the Pi only (the Rytm stays on the **Rytm firmware
-0.5.0**, OS 1.74 only, no flash). It adds the new touchscreen themes (SIDECAR in the GRID layout language, GRID, and the contrast options High blue,
-High green and Viper) with sections and sub-page rows, HOME as Overview and Perform, bigger touch targets and touch controls (drag the VOICE,
-INSERT FX, MASTER FX and OUT knobs), the **catalog** in the web page (list and install community user machines; the browser
-fetches, the Pi stays offline), the **BP303** bass machine, the headless remote service on the USB-C cable (the protocol is open,
-docs/remote-ui.md), and a fix for a USB-C cable pulled in the middle of traffic. It updates from the web page
-(Settings > Update, one `.scu` file) on a Pi that runs 0.5.0. Sidecar 0.5.0 added the SAMPLER machine, a better CHOP, SAMPLE EDIT, FILL,
+This repository holds the source of **Sidecar 0.5.1.1**, the fixes release after 0.5.1 (a fourth number: it sits between 0.5.1 and
+0.5.2). It updates the Pi from the web page (Settings > Update, one `.scu` file) on a Pi that runs 0.5.1 or 0.5.0, and the Rytm
+side has two small elemod files to flash (the Pi 0.5.1.1 also runs with the Rytm still on 0.5.0). **What 0.5.1.1 adds** since
+0.5.1, in plain words:
+
+- **Download the black box** from Settings > About in the web page: one file to send with a bug report, secrets masked.
+- **Lag diagnostics:** a "Lag now" marker and the Rytm's report timing in the black box; loading a project no longer holds
+  the control pass for 10 ms.
+- **Catalog audio previews:** listen to a community machine in the catalog before you install it (the browser streams it).
+- **Plugin API 2 `pool_info` / `pool_read`** now take the SAMPLES list code (`bank * 128 + row`, banks A..H) as well as bank A's
+  slot 1..127; slot values 128..1016 used to mean the host's internal line and now mean the list code (128 is bank B's OFF).
+  No known plugin used them. The SDK has `rmp_pool_code` and `rmp_pool_code_of_knob`.
+- **Fixes:** PLAITS SPEECH no longer drones after stop when HARM moves into a word bank; the remote UI sends no SRC frames
+  while the Rytm's machine list covers the view; UP + T5 opens the FX page (Send FX), as the sidebar's FX key does; no endless
+  loop when POOL is opened from a PRESET page, and DONE returns to where it came from; FILL's undo and the pattern writer
+  survive the Rytm repeating its project report; SPACE has no runaway hiss before the tape has heard a signal; the library
+  walk no longer writes past its level table at 12 folder levels deep.
+- **Versions** may have a fourth number: the update check and the web page's version note read it (0.5.1 < 0.5.1.1 < 0.5.2);
+  plugins and the catalog keep three numbers (docs/versioning.md).
+
+Sidecar 0.5.1 added the new touchscreen themes (SIDECAR in the GRID layout language, GRID, and the contrast options High blue,
+High green and Viper) with sections and sub-page rows, HOME as Overview and Perform, bigger touch targets and touch controls, the
+**catalog** in the web page, the **BP303** bass machine, the headless remote service on the USB-C cable (the protocol is open,
+docs/remote-ui.md), and a fix for a USB-C cable pulled in the middle of traffic. Sidecar 0.5.0 added the SAMPLER machine, a better CHOP, SAMPLE EDIT, FILL,
 the Rytm's own parameters on the XY pad, MIDI learn and poly-track p-locks, A and B LFOs, user send effects, the MIST texture machine,
 the new web page (web-next), updating from the web page and SD card images. MORPH, the looper, sidechain, the MIDI page's learn
 rows and a new WAVETABLE come in 0.5.2.
-The release notes have each item's status: <https://trigcondition.github.io/sidecar-expander/release-notes/#sidecar-051>.
+The release notes have each item's status: <https://trigcondition.github.io/sidecar-expander/release-notes/#sidecar-0511>.
 
-- Release and binaries: <https://github.com/trigcondition/sidecar-firmware/releases/tag/v0.5.1> (the update file,
+- Release and binaries: <https://github.com/trigcondition/sidecar-firmware/releases/tag/v0.5.1.1> (the update file,
   the SD card images, the Pi card files, the user machines and effects, the starter content, the release zip); 0.1.0 and
   0.2.0: <https://github.com/trigcondition/sidecar-expander/releases>
 - Documentation, the browser patcher and the web console: <https://trigcondition.github.io/sidecar-expander/>
@@ -75,9 +92,9 @@ Both run on every pull request (`.github/workflows/test.yml`).
 
 ## Written offer of source
 
-The released binaries (Sidecar for Pi 4B and Pi 5, version 0.5.1; Sidecar Mini, version 0.1.0) contain GPL and LGPL code, among it Circle
+The released binaries (Sidecar for Pi 4B and Pi 5, version 0.5.1.1; Sidecar Mini, version 0.1.0) contain GPL and LGPL code, among it Circle
 (GPL-3.0-or-later, with its `addon/rp1dsi` display driver linked into the Pi 5 kernel) and the Teensyduino core and SPI library
-(LGPL-2.1). The complete corresponding source of version 0.5.1 is this repository at tag `v0.5.1` (of Sidecar Mini 0.1.0: commit `101a3fb`), plus the third-party
+(LGPL-2.1). The complete corresponding source of version 0.5.1.1 is this repository at tag `v0.5.1.1` (of Sidecar Mini 0.1.0: commit `101a3fb`), plus the third-party
 sources the build scripts fetch at the pinned commits named in `NOTICE` (Circle with `pi/circle/*.patch`). For three years
 from the release, anyone who received a binary can also ask for it on a physical medium for the cost of that medium, or for
 the materials needed to relink the Teensy firmware with a modified LGPL part: open an issue in this repository.
