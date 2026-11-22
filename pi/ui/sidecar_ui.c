@@ -91,7 +91,7 @@ static int s_nMap;			// Settings > Display's touch test (UX review T1)
 // rail at the right edge from 1024x600, a row in the header at 800x480.
 enum { NAV_HOME, NAV_SEQ, NAV_PAT, NAV_VOICE, NAV_FX, NAV_SONG, NAV_REC, NAV_SET, NAV_N };
 static const char *const kNavName[NAV_N] = {"HOME", "SEQ", "PAT", "VOICE", "FX", "SONG", "REC", "SET"};
-static const char *const kNavPage[NAV_N] = {"HOME", "SEQ", "PAT", "VOICE", "INSERT FX", "SONG", "REC", "SET"};	// the table's names
+static const char *const kNavPage[NAV_N] = {"HOME", "SEQ", "PAT", "VOICE", "FX", "SONG", "REC", "SET"};	// the table's names
 static const char *nav_t (int i)		// its caption ("T11"; "" when the device has no key for it)
 {
 	static char b[NAV_N][8];

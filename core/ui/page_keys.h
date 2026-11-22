@@ -68,13 +68,13 @@ typedef struct {
    rytm-mods tools/emu/rled_emu.py stockup / stockupkeys]: UP held + the key leaves what the key alone leaves (in a list
    what UP tapped and then the key leave).
    rui1052: T1..T8 are the touchscreen's sidebar, top to bottom (pi/ui/sidecar_ui.c kNavPage: HOME SEQ PAT VOICE FX SONG
-   REC SET - the sidebar's FX is INSERT FX here); T9..T13 are the pages with no sidebar row, on the keys they have had
-   since rui1046 (SCOPE STATUS SAMPLE PROJECT POOL: only SAMPLE moved, into the row SONG left). Which screen a page
+   REC SET - the sidebar's FX is the FX section, SEND FX first; INSERT FX is VOICE > Insert); T9..T13 are the pages
+   with no sidebar row, on the keys they have had since rui1046 (SCOPE STATUS SAMPLE PROJECT POOL: only SAMPLE moved, into the row SONG left). Which screen a page
    belongs to is the row's `rytm` field, not its number (0: the touchscreen's alone - before rui1052 that was the
    leading run 1..6, and UP's map read the number). */
 static const sc_page_key_t sc_rytm_mk2_pages[] = {
 	{1, "HOME", 0, ""},		{2, "SEQ", 0, ""},		{3, "PAT", 0, ""},
-	{4, "VOICE", 0, ""},		{5, "INSERT FX", 0, ""},	{6, "SONG", "SONG", ""},
+	{4, "VOICE", 0, ""},		{5, "FX", 0, ""},		{6, "SONG", "SONG", ""},
 	{7, "REC", "REC", ""},		{8, "SET", 0, ""},		{9, "SCOPE", "SCOPE", ""},
 	{10, "STATUS", "SIDECAR", ""},	{11, "SAMPLE", "SAMPLE", ", AGAIN: AUTO"},
 	{12, "PROJECT", "PROJECT", ""},	{13, "POOL", "POOL", ""},
