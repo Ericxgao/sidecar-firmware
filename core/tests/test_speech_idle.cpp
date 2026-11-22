@@ -24,10 +24,12 @@ static std::vector<uint8_t> report(int cmd, int vb, int note, int vel, const std
 static int16_t ring[kBlock * 64][kVoices];
 static uint64_t mach[kMachines];
 static int blk = 0;
+static double sum_abs = 0;   // the voice 2 row's summed |sample| over every render(), a word's energy
 static int render(int blocks) {   // the voice 2 row's peak (int16 counts)
   int pk = 0;
   for (int b = 0; b < blocks; ++b, ++blk) {
     render_voices(ring, kBlock * 64, (blk % 64) * kBlock, 0, kVoices, mach);
+    for (int s = 0; s < kBlock; ++s) sum_abs += std::abs((int)ring[(blk % 64) * kBlock + s][2]);
     for (int s = 0; s < kBlock; ++s) pk = std::abs((int)ring[(blk % 64) * kBlock + s][2]) > pk ? std::abs((int)ring[(blk % 64) * kBlock + s][2]) : pk;
   }
   return pk;
@@ -72,6 +74,56 @@ int main() {
   printf("next note at HARM 60: peak %d\n", again);
   CHECK(again > 500);
   render(kSec * 3);
+  CHECK(render(kSec) < 2);
+  // a word in flight finishes on its own bank when HARM moves on (note held, no new trigger): the same energy as without the
+  // move, then silence. Before: the word was cut at the step (and the drone before that)
+  note_on(75);
+  sum_abs = 0;
+  render(kSec * 4);
+  double plain = sum_abs;
+  note_off();
+  render(kSec);
+  note_on(75);
+  render(kSec / 20);
+  params(100);   // bank 2 -> 4, mid-word
+  sum_abs = 0;
+  int tail = render(kSec * 4);
+  printf("word 75 -> 100 mid-word: energy %.0f of %.0f, peak after the step %d\n", sum_abs, plain, tail);
+  CHECK(plain > 1e5);
+  CHECK(sum_abs > plain * 0.7);   // (the first 50 ms were rendered before the step)
+  CHECK(render(kSec) < 2);        // the held note rests silent in the new bank
+  // a held note under a 2 Hz HARM LFO 15..105: the first word finishes, no drone afterwards
+  note_off();
+  render(kSec);
+  note_on(75);
+  sum_abs = 0;
+  int lfo_pk = 0;
+  for (int b = 0; b < kSec * 3; ++b) {
+    params(60 + 45 * (float)std::sin(b / 4000.0 * 2 * M_PI * 2));
+    int pk = render(1);
+    if (b < kSec / 2) lfo_pk = pk > lfo_pk ? pk : lfo_pk;
+  }
+  printf("held note, HARM LFO: first 0.5 s peak %d, energy %.0f\n", lfo_pk, sum_abs);
+  CHECK(lfo_pk > 500);
+  CHECK(sum_abs > plain * 0.5);
+  int late = 0;
+  for (int b = 0; b < kSec * 2; ++b) {
+    params(60 + 45 * (float)std::sin(b / 4000.0 * 2 * M_PI * 2));
+    int pk = render(1);
+    late = pk > late ? pk : late;
+  }
+  CHECK(late < 2);   // after the word ends: silent through every crossing
+  note_off();
+  render(kSec);
+  // a retrig that changes the bank in the same report speaks in the new bank
+  note_on(75);
+  render(kSec / 20);
+  note_on(100);
+  int retrig = render(kSec / 2);
+  printf("retrig into another bank: peak %d\n", retrig);
+  CHECK(retrig > 500);
+  note_off();
+  render(kSec * 4);
   CHECK(render(kSec) < 2);
   printf("test_speech_idle: PASS\n");
   return 0;

@@ -13,7 +13,8 @@ SHIM=$D/../sim/plaits/shim/plaits/user_data.h
 RNG=$D/../sim/plaits/shim/stmlib/utils/random.h
 if [ "${1:-}" = --if-stale ] && [ -d "$L" ] && cmp -s "$D/../sim/plaits/fm_machine.h" "$L/src/fm_machine.h" &&
    cmp -s "$SHIM" "$L/user_data.h.src" && cmp -s "$RNG" "$L/src/stmlib/utils/random.h" &&
-   cmp -s "$D/../sim/plaits/operator_neon.h" "$L/src/plaits/dsp/fm/operator_neon.h"; then
+   cmp -s "$D/../sim/plaits/operator_neon.h" "$L/src/plaits/dsp/fm/operator_neon.h" &&
+   cmp -s "$D/setup_plaits_lib.sh" "$L/setup_plaits_lib.sh.src"; then
   exit 0
 fi
 "$D/../sim/plaits/build.sh" >/dev/null   # makes sure the vendor checkout exists
@@ -29,6 +30,7 @@ done
 # here): the simulator's stand-in (no user data, except a DX7 bank handed over by
 # the 6-OP FM machine, fm_machine.h), which comes along.
 cp "$SHIM" "$L/src/plaits/user_data.h"
+cp "$D/setup_plaits_lib.sh" "$L/setup_plaits_lib.sh.src"   # this script as run, so --if-stale regenerates when it changes
 cp "$SHIM" "$L/user_data.h.src"   # the shim as copied, for --if-stale (outside src/: not compiled)
 # stmlib's Random with a state per render core when RYTM_RENDER_CORES > 1 (the Pi); unset, stmlib's own
 cp "$RNG" "$L/src/stmlib/utils/random.h"
@@ -49,8 +51,12 @@ cp "$D/../sim/plaits/fm_machine.h" "$L/src/fm_machine.h"
 # SPEECH's word banks: stock Plaits scans a bank continuously when HARM changes the bank (or returns from the
 # phonemes) with no word playing, and with a trigger patched (the voices always patch it) SpeechEngine's
 # already_enveloped bypasses the LPG: a drone after the note off, its level moving with HARM. No word, no sound.
-# Behaviour change: a word already playing is cut when HARM moves to another bank (stock turned that into the drone).
+# A word in flight finishes on its own bank: a HARM move to another bank does not reload (cut) it, unless a trigger comes
+# in the same block (stock reloaded at once and turned the rest into the drone). The new bank loads once the word has
+# ended (the controller rests on its last frame, so the silent-bank guard above then keeps it quiet), or on the next trigger.
 perl -0pi -e 's|(  if \(playback_frame_ == -1 && remaining_frame_samples_ == 0\) \{\n)|  if (bank != -1 && !free_running && playback_frame_ == -1) {   // rytm: a bank with no word to play is silent\n    fill(&sample_[0], &sample_[2], 0.0f);\n    fill(&next_sample_[0], &next_sample_[2], 0.0f);\n    fill(excitation, excitation + size, 0.0f);\n    fill(output, output + size, 0.0f);\n    return;\n  }\n$1|' "$L/src/plaits/dsp/speech/lpc_speech_synth_controller.cc"
+perl -0pi -e 's|  if \(bank != -1\) \{\n    bool reset_everything = word_bank_->Load\(bank\);|  // rytm: a word in flight finishes on its own bank (no reload until it ends, or a trigger)\n  const bool word_in_flight = playback_frame_ != -1 && playback_frame_ < last_playback_frame_ \&\& playback_frame_ < word_bank_->num_frames();\n  if (bank != -1 \&\& (trigger \|\| free_running \|\| !word_in_flight)) {\n    bool reset_everything = word_bank_->Load(bank);|' "$L/src/plaits/dsp/speech/lpc_speech_synth_controller.cc"
+grep -q 'rytm: a word in flight finishes on its own bank' "$L/src/plaits/dsp/speech/lpc_speech_synth_controller.cc" || { echo "lpc_speech_synth_controller.cc: word-in-flight patch failed"; exit 1; }
 grep -q 'rytm: a bank with no word to play is silent' "$L/src/plaits/dsp/speech/lpc_speech_synth_controller.cc" || { echo "lpc_speech_synth_controller.cc: patch failed"; exit 1; }
 # The FM operators' NEON path on AArch64 (sim/plaits/operator_neon.h, inside plaits::fm, after the C renamed RenderOperatorsC)
 O="$L/src/plaits/dsp/fm/operator.h"
