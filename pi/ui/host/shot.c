@@ -2692,7 +2692,7 @@ static void theme_run (int style, const char *pre)
 	{
 		static const int kPg[8] = {0, 4, 5, 8, 2, 10, 11, -1};
 		static const char *const kKey[8] = {"T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8"};
-		static const char *const kPage[8] = {"HOME", "SEQ", "PAT", "VOICE", "INSERT FX", "SONG", "REC", "SET"};
+		static const char *const kPage[8] = {"HOME", "SEQ", "PAT", "VOICE", "FX", "SONG", "REC", "SET"};
 		sidecar_ui_show (2); sidecar_ui_show (8); sidecar_ui_show (0); run (2);		// (FX remembers Sends, VOICE Sound)
 		for (int k = 0; k < 8; k++)
 		{
@@ -2781,7 +2781,7 @@ static void theme_run (int style, const char *pre)
 	EXPECT (text_shown (lv_layer_top (), style == THEME_OLED ? "T13 POOL" : "T13 Pool"));
 	EXPECT (text_shown (lv_layer_top (), "TRIG SEQ"));
 	EXPECT (text_shown (lv_layer_top (), style == THEME_OLED ? "LFO LFOS" : "LFO LFOs"));
-	EXPECT (text_shown (lv_layer_top (), style == THEME_OLED ? "T5 INSERT FX" : "T5 Insert FX"));
+	EXPECT (text_shown (lv_layer_top (), style == THEME_OLED ? "T5 FX" : "T5 FX"));
 	EXPECT (text_shown (lv_layer_top (), style == THEME_OLED ? "T6 SONG" : "T6 Song"));
 	EXPECT (text_shown (lv_layer_top (), "T7 REC"));
 	EXPECT (text_shown (lv_layer_top (), "T8 SET"));

@@ -11,6 +11,7 @@
 #include "engine.h"
 #include "machines.h"
 #include "voices.h"
+#include "ui/page_keys.h"
 #include "ui/remote.h"
 
 namespace core { void voices_init(); }
@@ -79,6 +80,22 @@ int main() {
   strcpy(some[3], "X"), strcpy(some[5], "Y");
   g = gate(true, false, kPlaits, false, 0, some);
   CHECK((g.e & ~((1 << 3) | (1 << 5))) == 0);
+  // UP + T1..T8 (49 1 n) and the sidebar's keys T1..T8 (pi/ui/host/shot.c N1: kPg) open the same page, and the table names
+  // the key as the sidebar does (pi/ui/sidecar_ui.c kNavName): UP + T5 is FX (Send FX), not INSERT FX (VOICE > Insert)
+  {
+    static const char* const kLabel[8] = {"HOME", "SEQ", "PAT", "VOICE", "FX", "SONG", "REC", "SET"};
+    static const int kPage[8] = {0, 4, 5, 8, 2, 10, 11, 1};   // sidecar_ui.h: HOME SEQ PAT VOICE SEND FX SONG REC SOUND
+    uint32_t seen = 0, track_seen = 0;
+    voice_pi::Seen(&seen, &track_seen);
+    for (int k = 0; k < 8; ++k) {
+      CHECK(sc_page_of_code(k + 1) && sc_streq(sc_page_of_code(k + 1)->name, kLabel[k]));
+      const uint8_t m[] = {0xf0, 0x7d, 0x52, 0x54, 0x49, 1, 1, (uint8_t)(k + 1), 0xf7};
+      engine_sysex(m, (int)sizeof m);
+      const int got = voice_pi::Request(&seen, false, &track_seen);
+      if (got != kPage[k]) printf("UP+T%d: page %d, sidebar %d\n", k + 1, got, kPage[k]);
+      CHECK(got == kPage[k]);
+    }
+  }
   printf("test_voice_gate: ok\n");
   return 0;
 }
