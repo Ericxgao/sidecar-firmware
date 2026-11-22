@@ -8,14 +8,21 @@ export const CAT_BASE = "https://trigcondition.github.io/sidecar-machines/"; // 
 export const CAT_MAX_ENTRIES = 200;
 export const CAT_MAX_FILE = 96 + (1 << 20) + (64 << 10); // the Pi's loader limit (core/user/um.cpp kPkgMax); the upload check allows 2 MB but the loader would refuse more than this
 const CAT_MAX_INDEX = 4 << 20;
+// the registry's preview rules (its tools/previews.py): at most 8 files of 256 B to 2 MiB, "<name>.mp3" with a name of up to 40 characters
+export const CAT_MAX_PREVIEWS = 8;
+const PV_NAME = /^[A-Za-z0-9](?:(?:[A-Za-z0-9_.()+#-]| (?! ))*[A-Za-z0-9_()+#-])?$/;
+const PV_DIR = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const PV_RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/;
 const CAT_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.rmp$/;
 
 export type CatBoard = "pi4" | "pi5";
 export interface CatEntry {
   id: string; kind: "machine" | "effect"; version: string; v: [number, number, number]; board: string;
   name: string; short: string; author: string; licence: string; sha256: string; file: string; size: number;
-  description: string; source: string; demo: string;
+  description: string; source: string; demo: string; previews: CatPreview[];
 }
+/** One audio preview of an entry (the registry's optional `previews`): a display name and an https: URL under CAT_BASE. */
+export interface CatPreview { name: string; url: string; bytes: number }
 export interface CatState { k: "install" | "update" | "installed" | "newer"; text: string; from?: string; file?: string }
 
 const clip = (s: unknown, n: number) => String(s == null ? "" : s).slice(0, n);
@@ -31,6 +38,31 @@ export function cmpVer(a: number[], b: number[]): number {
   for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
   return 0;
 }
+/** The https: URL of a preview file under CAT_BASE ("machines/<dirs>/<name>.mp3", the registry's file name rule), or "". */
+export function previewUrl(f: unknown): string {
+  if (typeof f !== "string" || !f.startsWith("machines/") || !f.endsWith(".mp3")) return "";
+  const seg = f.split("/"), disp = (seg.pop() as string).slice(0, -4);
+  if (!disp || disp.length > 40 || !PV_NAME.test(disp) || disp.includes("..") || PV_RESERVED.test(disp.split(".")[0].trimEnd().toUpperCase())) return "";
+  if (!seg.every((d) => PV_DIR.test(d))) return "";
+  try {
+    const u = new URL([...seg, disp + ".mp3"].map(encodeURIComponent).join("/"), CAT_BASE);
+    return u.protocol === "https:" && u.href.startsWith(CAT_BASE) ? u.href : "";
+  } catch { return ""; }
+}
+/** The index's previews: at most 8, bad items dropped (the entry stays). */
+function catPreviews(p: unknown): CatPreview[] {
+  const out: CatPreview[] = [], seen = new Set<string>();
+  if (!Array.isArray(p)) return out;
+  for (const x of p) {
+    if (out.length >= CAT_MAX_PREVIEWS) break;
+    if (!x || typeof x !== "object" || typeof x.name !== "string" || !Number.isInteger(x.bytes) || x.bytes < 256 || x.bytes > 2 << 20) continue;
+    const url = previewUrl(x.file), name = clip(x.name, 40).trim();
+    if (!url || !name || seen.has(url)) continue; // a blank name or a repeated file is dropped
+    seen.add(url);
+    out.push({ name, url, bytes: x.bytes });
+  }
+  return out;
+}
 /** The index's entries, cleaned and capped: the newest version of each id and board; bad entries dropped. */
 export function catList(idx: any, boards: string[] = ["pi4", "pi5"]): CatEntry[] {
   if (!idx || idx.schema !== 1 || !Array.isArray(idx.entries)) throw new Error("unknown catalog format");
@@ -42,7 +74,7 @@ export function catList(idx: any, boards: string[] = ["pi4", "pi5"]): CatEntry[]
     if (!Number.isInteger(x.size) || x.size < 1 || x.size > CAT_MAX_FILE) continue;
     const e: CatEntry = { id: clip(x.id, 40), kind: x.kind, version: String(x.version), v, board: x.board, name: clip(x.name, 10), short: clip(x.short, 4),
       author: clip(x.author, 40), licence: clip(x.licence, 60), sha256: x.sha256, file: x.file, size: x.size, description: clip(x.description, 600),
-      source: safeUrl(x.source), demo: safeUrl(x.demo) };
+      source: safeUrl(x.source), demo: safeUrl(x.demo), previews: catPreviews(x.previews) };
     const k = `${e.id}/${e.board}`, o = best.get(k);
     if (!o || cmpVer(e.v, o.v) > 0) best.set(k, e);
   }

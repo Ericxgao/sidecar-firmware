@@ -99,3 +99,44 @@ describe("download and check", () => {
     expect(await sha256Hex(buf(bytes))).toBe(sha);
   });
 });
+
+describe("previews", () => {
+  const pv = (file: string, o: Record<string, unknown> = {}) => ({ name: "01 Acid line", file, bytes: 193743, ...o });
+  const F = "machines/x.one/1.0.0/preview/01 Acid line.mp3";
+  const get = (previews: unknown) => catList(idx(ent({ previews })))[0].previews;
+  it("keeps good items with the URL resolved against the registry and encoded", () => {
+    expect(get([pv(F)])).toEqual([{ name: "01 Acid line", url: CAT_BASE + "machines/x.one/1.0.0/preview/01%20Acid%20line.mp3", bytes: 193743 }]);
+  });
+  it("encodes names with # and +, and enforces the minimum size", () => {
+    const f = "machines/x.one/1.0.0/preview/a#b+c (d).mp3";
+    expect(get([pv(f, { name: "a#b+c (d)" })])![0].url).toBe(CAT_BASE + "machines/x.one/1.0.0/preview/a%23b%2Bc%20(d).mp3");
+    expect(get([pv(F, { bytes: 255 })])).toEqual([]);
+    expect(get([pv(F, { bytes: 256 })])!.length).toBe(1);
+    expect(get([pv(F, { bytes: 2 << 20 })])!.length).toBe(1);
+    expect(get([pv(F, { bytes: (2 << 20) + 1 })])).toEqual([]);
+  });
+  it("a blank name is dropped, a repeated file is listed once", () => {
+    expect(get([pv(F, { name: "" }), pv(F, { name: "   " })])).toEqual([]);
+    expect(get([pv(F), pv(F, { name: "again" })])!.length).toBe(1);
+  });
+  it("an entry without previews is unchanged", () => {
+    expect(get(undefined)).toEqual([]);
+    expect(get("nope")).toEqual([]);
+    expect(catList(idx(ent()))[0].id).toBe("x.one");
+  });
+  it("caps at 8, clips names, drops bad items but not the entry", () => {
+    const many = Array.from({ length: 12 }, (_, i) => pv(`machines/x.one/1.0.0/preview/t${i}.mp3`, { name: `t${i}` }));
+    expect(get(many)!.length).toBe(8);
+    expect(get([pv(F, { name: "n".repeat(200) })])![0].name.length).toBe(40);
+    const L = catList(idx(ent({ previews: [pv(F), null, 7, pv(F, { bytes: 1.5 }), pv(F, { bytes: -1 }), pv(F, { bytes: 3 << 20 }), pv(F, { name: 5 })] })));
+    expect(L.length).toBe(1);
+    expect(L[0].previews!.length).toBe(1);
+  });
+  it("refuses bad file names and escapes from the registry", () => {
+    const bad = ["../x.mp3", "machines/../../x.mp3", "machines/a/../b.mp3", "machines/./a.mp3", "http://evil.example/machines/a.mp3", "https://evil.example/machines/a.mp3",
+      "//evil.example/machines/a.mp3", "javascript:alert(1)", "/machines/a.mp3", "machines\\a.mp3", "machines/a/b.wav", "machines/a/b.MP3", "machines/a/.mp3",
+      "machines/a/CON.mp3", "machines/a/a  b.mp3", "machines/a/a b .mp3", "machines/a/a..b.mp3", "machines/a/a%2e%2e.mp3", "machines/a/a?x=1.mp3", "machines/a/a#x.mp3 ", "x.mp3", 5, null,
+      "machines/a/" + "n".repeat(41) + ".mp3"];
+    expect(get(bad.map((f) => pv(f as string)))).toEqual([]);
+  });
+});
