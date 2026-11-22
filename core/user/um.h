@@ -44,6 +44,11 @@ struct Exec {
   uint32_t board;                        // rmp3_host.board: 4 or 5 on a Pi, 0 elsewhere
 };
 
+// API 2 pool_info / pool_read: the pool line (1..npool, bank * 127 + row) a plugin's slot argument names. Two spellings:
+// 1..127 is bank A's row (as always), and the list code bank * 128 + row (what the lists and the Rytm use; 128..1023,
+// row 0 of a bank is OFF). 0: neither (OFF, out of range).
+int32_t pool_line(int32_t slot);
+
 constexpr int kSlots = 5;
 constexpr int kStore = 32;               // packages listed (the Rytm's list holds 32)
 constexpr uint32_t kStateMax = 65536;    // a voice's plugin state at most (the Teensy's is 16 KB without PSRAM)
