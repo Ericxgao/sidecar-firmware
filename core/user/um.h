@@ -17,6 +17,8 @@
 #pragma once
 #include <stdint.h>
 
+#include "rmp_api.h"
+
 namespace um {
 
 struct Exec {
@@ -48,6 +50,11 @@ struct Exec {
 // 1..127 is bank A's row (as always), and the list code bank * 128 + row (what the lists and the Rytm use; 128..1023,
 // row 0 of a bank is OFF). 0: neither (OFF, out of range).
 int32_t pool_line(int32_t slot);
+// Test hooks: pool_info / pool_read as voice vi's plugin sees them (see core/tests/test_pool_code.cpp)
+void test_pool_voice(int vi);
+int32_t test_pool_info(int vi, int32_t slot, rmp_pool_info* info);
+int32_t test_pool_read(int vi, int32_t slot, uint32_t pos, float* buf, int32_t n);
+bool test_pool_pass();
 
 constexpr int kSlots = 5;
 constexpr int kStore = 32;               // packages listed (the Rytm's list holds 32)

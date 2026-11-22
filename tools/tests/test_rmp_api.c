@@ -24,6 +24,10 @@ int main(void) {
   assert(rmp_pool_code_of_knob(0.0f) == 0 && rmp_pool_code_of_knob(5.0f) == 5 && rmp_pool_code_of_knob(127.0f) == 127);
   assert(rmp_pool_code_of_knob(5.0f + 32 / 128.0f) == 261 && rmp_pool_code_of_knob(127.0f + 112 / 128.0f) == 1023);
   assert(rmp_pool_code_of_knob(0.0f + 32 / 128.0f) == 256 && rmp_pool_code_of_knob(-1.0f) == 0);
+  assert(rmp_pool_code_of_knob(128.0f) == 127 && rmp_pool_code_of_knob(200.0f) == 127 && rmp_pool_code_of_knob(1e30f) == 127);
+  assert(rmp_pool_code_of_knob(0.0f / 0.0f) == 0 && rmp_pool_code_of_knob(-1e30f) == 0);
+  assert(rmp_pool_code_of_knob(5.0f + 0.4f / 128) == 5 && rmp_pool_code_of_knob(5.0f + 15.6f / 128) == 5 + 128);   /* the +0.5 rounds: lo 0, lo 16 */
+  assert(rmp_pool_code_of_knob(5.0f + 127.6f / 128) == 5 + 7 * 128 && rmp_pool_code_of_knob(5.9999f) == 5 + 7 * 128);
   /* the accessors: a v1 table has no v2 functions, a v2 table the ones it fills */
   rmp_plugin p = {RMP_PLUGIN_MAGIC, 1u, 0, 0, 0, 0, 0, 0, 0, 0, {0, RMP_FN(le), RMP_FN(ve), RMP_FN(ve), 0, 0, 0, 0}};
   assert(rmp_load_entry_of(&p) == 0 && rmp_voice_enter_of(&p) == 0 && rmp_voice_leave_of(&p) == 0);

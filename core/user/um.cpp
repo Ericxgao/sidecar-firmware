@@ -912,6 +912,21 @@ void on_pool_changed(int line) {   // a pool slot (or the pool: -1) changed: the
     if (line < 0 || g_up[vi].slot == line + 1 || g_up[vi].bad == line + 1 || g_up[vi].want == line + 1) upool_drop(vi);
 }
 
+}  // namespace
+// Test hooks (core/tests/test_pool_code.cpp): the API 2 pool host functions as voice vi's plugin calls them, without a plugin
+// image; test_pool_voice puts the voice on a slot (g_cur) so the control core's pass resolves what pool_info asked for.
+void test_pool_voice(int vi) { g_cur[vi] = 0; }
+int32_t test_pool_info(int vi, int32_t slot, rmp_pool_info* info) {
+  VNow now(vi);
+  return h_pool_info(slot, info);
+}
+int32_t test_pool_read(int vi, int32_t slot, uint32_t pos, float* buf, int32_t n) {
+  VNow now(vi);
+  return h_pool_read(slot, pos, buf, n);
+}
+bool test_pool_pass() { return upool_pass(); }
+namespace {
+
 // ---- presets
 void pre_invalidate(int s) {
 #if CORE_MSAMP

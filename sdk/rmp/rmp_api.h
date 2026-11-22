@@ -111,9 +111,10 @@ static inline int32_t rmp_pool_code(int32_t bank, int32_t row) { return bank * 1
 /* A SAMPLES knob's value (P1..P16 as params() gets it) as a pool code: the integer is the row, the fraction
    (1/128 steps, bank * 16) the bank. A knob without a bank in its fraction gives bank A's row, as (int)value does. */
 static inline int32_t rmp_pool_code_of_knob(float value) {
-  int32_t row = (int32_t)value, lo;
-  if (!(value > 0.0f)) return 0;
-  if (row > 127) row = 127;
+  int32_t row, lo;
+  if (!(value > 0.0f)) return 0;   /* 0, negative, NaN */
+  if (value >= 128.0f) return 127;   /* out of a knob's range: bank A's last row, as the host reads it */
+  row = (int32_t)value;
   lo = (int32_t)((value - (float)row) * 128.0f + 0.5f);
   return rmp_pool_code(lo > 127 ? 7 : lo >> 4, row);
 }
