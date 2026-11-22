@@ -12,6 +12,7 @@
 #include "guard.h"
 #include "idlewait.h"
 #include "midi_in.h"
+#include "lagdiag.h"	// the Rytm report stream timing (RxDiag; core 3 writes, core 0 prints)
 #include "notes.h"
 #include "paircode_pi.h"
 #include "usbc_pi.h"
@@ -66,6 +67,14 @@ static volatile u32 s_nBenchTurn = 4;		// the core whose bench runs now (4: none
 static CEngineCores::TBench s_Bench[4][CEngineCores::BenchMachines];
 static u64 s_nDroneAt;
 
+// The microsecond clock for lagdiag.h (the generic timer / its ticks a microsecond; 54 MHz on the Pi 4 and 5)
+static inline u64 TicksToUs (u64 t)
+{
+	u64 nPerUs = TickRate () / 1000000;
+	return t / (nPerUs != 0 ? nPerUs : 1);
+}
+static lagdiag::RxDiag s_Rx;		// the Rytm's reports and SysEx timing: core 3 (FromRytm, the pass) writes, CEngineCores::TakeRxLine reads
+
 // The SysEx messages that took core 3 over 1 ms, the last kSlowSx: {command byte, the byte after it, length, us}. The
 // pattern-switch gap (~41 ms in the midi section, 2026-10-26) is one of these; /status "slowSx" names it.
 static volatile unsigned s_SlowSx[CEngineCores::kSlowSx][4], s_nSlowSx;
@@ -107,6 +116,7 @@ static volatile boolean s_bModded = FALSE;
 static void FromRytm (const u8 *pData, int nLength)
 {
 	if (nLength >= 5 && pData[1] == 0x7D && pData[2] == 0x52 && pData[3] == 0x54) s_bModded = TRUE;
+	s_Rx.on_sysex (TicksToUs (Ticks ()), pData, nLength);	// the arrival, before the handling below takes its time
 	ToCore (pData, nLength);
 }
 static void OnChannel (u8 s, u8 a, u8 b)
@@ -490,6 +500,7 @@ void CEngineCores::Control (void)
 			bWorked = TRUE;
 		}
 		Mark (0);
+		s_Rx.tick (TicksToUs (Ticks ()));	// a second of the report stream ends here too (now: the messages above were stamped after t0)
 		u32 nKey;
 		while (g_KeysIn.pop (&nKey))
 		{
@@ -505,7 +516,7 @@ void CEngineCores::Control (void)
 		}
 		Mark (2);
 		Drone ();
-		if (g_bRytmGone) { g_bRytmGone = false; bridge::rytm_gone (); }
+		if (g_bRytmGone) { g_bRytmGone = false; bridge::rytm_gone (); s_Rx.forget (); }
 		bridge::rytm_link (!g_bRytmOff);
 		if (g_bRytmResync) { g_bRytmResync = false; bridge::rytm_resync (); }
 		bridge::tick ();
@@ -718,6 +729,14 @@ void CEngineCores::Command (const char *p)
 	{
 		L->Write (From, LogWarning, "unknown command \"%s\"", p);
 	}
+}
+
+// Core 0, once a second: the report stream's last whole second as its log line, 0 when no report came (lagdiag.h RxDiag)
+unsigned CEngineCores::TakeRxLine (char *pOut, unsigned nMax)
+{
+	lagdiag::RxDiag::Second x;
+	if (!s_Rx.take (&x)) return 0;
+	return lagdiag::fmt_rx (pOut, nMax, x);
 }
 
 void CEngineCores::TakeStats (TStats *s)

@@ -33,7 +33,7 @@ CORE_OBJ    := $(addprefix $(B)/obj/,$(CORE_O))
 MC_CORE_OBJ := $(addprefix $(MC)/obj/,$(CORE_O))
 .SECONDARY:   # (make would delete the objects after a run as intermediates, and compile them all again the next)
 
-.PHONY: engines test lib clean demo-wavegrain demo-insfx demo-tape demo-amp demo-livein demo-chop bundle-tool fuzz-fmt
+.PHONY: engines test lib clean demo-wavegrain demo-insfx demo-tape demo-amp demo-livein demo-chop bundle-tool fuzz-fmt test-lib-san
 # the format registry's fuzz target (tests/fuzz_fmt.cpp; docs/LIBRARY.md "Tests"): libFuzzer + ASan + UBSan with
 # Homebrew's clang (FUZZ_CXX; brew install llvm) for FUZZ_SECS seconds (default 60) from the golden files; without it
 # the same target under ASan + UBSan with its own driver (FUZZ_RUNS mutated inputs, default 200000)
@@ -52,6 +52,13 @@ fuzz-fmt:
 	  $(CXX) $(FUZZ_FLAGS) -fsanitize=address,undefined -DFUZZ_STANDALONE -o $(B)/fuzz/fuzz_fmt $(FUZZ_SRC) && \
 	  ./$(B)/fuzz/fuzz_fmt tests/golden $(or $(FUZZ_RUNS),200000); \
 	fi
+# the library walk's depth test (tests/test_library_depth.cpp) with library.cpp and the test under ASan + UBSan: a plain
+# build does not see an out-of-bounds close of the walk's level table, the sanitizers do (the rest are the plain objects)
+SAN_DIR := $(B)/san
+test-lib-san: $(CORE_OBJ) $(DEPS_H) $(B)/libengines.a
+	@mkdir -p $(SAN_DIR)
+	$(CXX) $(CXXFLAGS) -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -Itests -o $(SAN_DIR)/test_library_depth tests/test_library_depth.cpp lib/library.cpp $(filter-out $(B)/obj/lib/library.o,$(CORE_OBJ)) $(B)/libengines.a
+	./$(SAN_DIR)/test_library_depth
 # WAVETABLE's and GRANULAR's demo renders (tests/demo/render_wavegrain.cpp) into OUT (default build/)
 demo-wavegrain: $(B)/render_wavegrain
 	./$(B)/render_wavegrain $(or $(OUT),$(B))
@@ -169,7 +176,7 @@ ALL_TESTS := $(TESTS) $(MC_TESTS) $(SMALL_TESTS) $(NOMORPH_TESTS)
 # The tests that check a wall-clock bound (a control pass under the FIFO, a call under 50 us): run one at a time after
 # the parallel batch, when nothing else loads the CPU (under -j10 test_library_stall measured a 2142 us pass, 1835 alone)
 TIMING_TESTS := $(addprefix $(B)/,test_bundle_stall test_library_stall test_loadstall test_insert test_sat test_library test_tape \
-                  test_send_fx test_srclib test_seqtop test_noteedit test_stereo test_msamp_load)
+                  test_send_fx test_srclib test_seqtop test_noteedit test_stereo test_msamp_load test_projload_cost)
 # The Teensy's configuration (no CORE_POLY, no CORE_MSAMP: no built-in MD), compiled for syntax only on the files the
 # MD change touched that build there today (voices.cpp, ui/remote.cpp, lfo.cpp and a few more already fail in that
 # configuration on integ-1028, unrelated: not listed); core/mod (spec-050 1.7: kV and kFx only there)
