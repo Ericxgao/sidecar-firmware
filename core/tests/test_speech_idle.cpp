@@ -92,6 +92,36 @@ int main() {
   CHECK(plain > 1e5);
   CHECK(sum_abs > plain * 0.7);   // (the first 50 ms were rendered before the step)
   CHECK(render(kSec) < 2);        // the held note rests silent in the new bank
+  // HARM into the LPC phoneme zone (35) or the naive zone (20) mid-word: the word keeps playing from its own bank's frames (stock
+  // and the first patch read the 15-entry phoneme table with a word frame index). The engine's LPG gates the output in those
+  // zones, so a word is judged by what is left of it when HARM returns to its bank after 0.1 s
+  for (float h : {35.0f, 20.0f}) {
+    note_off();
+    render(kSec);
+    note_on(75);
+    render(kSec / 20);
+    params(h);
+    render(kSec / 10);
+    params(75);
+    sum_abs = 0;
+    int pk = render(kSec * 4);
+    printf("word 75 -> %.0f for 0.1 s -> 75: energy after %.0f of %.0f, peak %d\n", h, sum_abs, plain, pk);
+    CHECK(sum_abs > plain * 0.4);
+    CHECK(pk < 3200);   // the over-read gave 3699 (garbage frames); the word peaks at ~2600
+    CHECK(render(kSec) < 2);   // and it rests silent
+    if (h < 30) continue;   // (the naive zone does not render the LPC controller: the word waits there and finishes on return)
+    // a long stay in the zone: the word ends there, the phonemes take over, nothing sounds when HARM comes back
+    note_off();
+    render(kSec);
+    note_on(75);
+    render(kSec / 20);
+    params(h);
+    render(kSec * 4);
+    params(75);
+    CHECK(render(kSec) < 2);
+    params(100);
+    CHECK(render(kSec) < 2);
+  }
   // a held note under a 2 Hz HARM LFO 15..105: the first word finishes, no drone afterwards
   note_off();
   render(kSec);
@@ -104,8 +134,8 @@ int main() {
     if (b < kSec / 2) lfo_pk = pk > lfo_pk ? pk : lfo_pk;
   }
   printf("held note, HARM LFO: first 0.5 s peak %d, energy %.0f\n", lfo_pk, sum_abs);
-  CHECK(lfo_pk > 500);
-  CHECK(sum_abs > plain * 0.5);
+  CHECK(lfo_pk > 2000);   // a whole word's level, not a cut stub
+  CHECK(sum_abs > plain * 0.6);   // the word plays on across the phoneme-zone crossings (the engine's LPG mutes its output below HARM 42)
   int late = 0;
   for (int b = 0; b < kSec * 2; ++b) {
     params(60 + 45 * (float)std::sin(b / 4000.0 * 2 * M_PI * 2));
