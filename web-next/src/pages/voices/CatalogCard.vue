@@ -2,11 +2,12 @@
      (src/lib/catalog.ts; the Pi never goes to the internet). Install / Update downloads the package here, checks its
      SHA-256, and sends it through the ordinary upload into /Plugins; the Pi's loader checks it again. -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import Card from "../../ui/Card.vue";
 import { useSidecar } from "../../lib/useSidecar";
 import { confirmAsk } from "../../lib/confirm";
 import { uploadFile } from "../../lib/upload";
+import { PreviewPlayer, idleState, type PreviewState } from "../../lib/preview";
 import { CAT_BASE, boardOf, catAsk, catFileName, catShown, catState, fetchPackage, loadIndex, type CatEntry } from "../../lib/catalog";
 
 const props = defineProps<{ installed: { [k: string]: any }[] }>();
@@ -24,6 +25,22 @@ const board = computed(() => boardOf((status.value?.usbMode as { board?: number 
 const shown = computed(() => catShown(entries.value, kind.value, q.value, board.value));
 const total = computed(() => entries.value.filter((e) => !board.value || e.board === board.value).length);
 const rows = computed(() => shown.value.map((e) => ({ e, st: catState(e, props.installed) })));
+
+// previews: one shared player (src/lib/preview.ts), streamed from the registry's site by this browser; nothing loads until play
+const pv = ref<PreviewState>(idleState());
+const player = new PreviewPlayer(undefined, (s) => (pv.value = s));
+const opened = ref<{ [k: string]: boolean }>({});
+const key = (e: CatEntry) => `${e.id}/${e.board}`;
+const trackKey = (e: CatEntry, url: string) => `${key(e)}|${url}`; // pi4 and pi5 rows of one id share URLs
+function togglePreviews(e: CatEntry) {
+  const open = !opened.value[key(e)];
+  opened.value = { ...opened.value, [key(e)]: open };
+  if (!open && pv.value.key.startsWith(`${key(e)}|`)) player.stop();
+}
+watch([kind, q, board, entries], () => player.stop()); // the list changes: nothing keeps playing
+const leave = () => player.stop();
+onMounted(() => window.addEventListener("pagehide", leave));
+onUnmounted(() => { window.removeEventListener("pagehide", leave); player.stop(); });
 
 async function load() {
   loading.value = true;
@@ -81,7 +98,7 @@ async function install(e: CatEntry, file?: string) {
       </p>
       <p v-else-if="!loading && !rows.length" class="small">Nothing matches.</p>
       <ul class="cat">
-        <li v-for="{ e, st } in rows" :key="`${e.id}/${e.board}`">
+        <li v-for="({ e, st }, n) in rows" :key="`${e.id}/${e.board}`">
           <div class="h">
             <b>{{ e.name || e.id }}</b>
             <span class="tag">{{ e.short }}</span>
@@ -97,6 +114,19 @@ async function install(e: CatEntry, file?: string) {
             <template v-if="e.demo"> · <a :href="e.demo" target="_blank" rel="noopener noreferrer">demo</a></template>
           </div>
           <div class="desc">{{ e.description }}</div>
+          <div v-if="e.previews.length" class="pv">
+            <button type="button" :aria-expanded="!!opened[key(e)]" :aria-controls="`pv-${n}`" @click="togglePreviews(e)">Previews ({{ e.previews.length }})</button>
+            <ul v-show="opened[key(e)]" :id="`pv-${n}`" class="tracks">
+              <li v-for="p in e.previews" :key="p.url">
+                <button type="button" :aria-label="`${player.isPlaying(trackKey(e, p.url)) ? 'Pause' : 'Play'} ${p.name}`" @click="player.toggle(trackKey(e, p.url), p.url)">{{ pv.key === trackKey(e, p.url) && pv.playing ? "Pause" : "Play" }}</button>
+                <span class="tname">{{ p.name }}</span>
+                <input type="range" min="0" max="1000" step="1" :disabled="pv.key !== trackKey(e, p.url)" :value="pv.key === trackKey(e, p.url) ? pv.pos : 0" :aria-label="`Position in ${p.name}`"
+                  :aria-valuetext="pv.key === trackKey(e, p.url) ? pv.time : '0:00'" @input="player.seek(trackKey(e, p.url), +($event.target as HTMLInputElement).value)" />
+                <span class="small clk" :class="{ warm: pv.errKey === trackKey(e, p.url) }" role="status">{{
+                  pv.errKey === trackKey(e, p.url) ? pv.error : pv.key !== trackKey(e, p.url) ? "0:00" : pv.loading ? "loading…" : pv.time }}</span>
+              </li>
+            </ul>
+          </div>
         </li>
       </ul>
       <p v-if="msg" class="small" :class="{ warm: bad }" role="status">{{ msg }}</p>
@@ -113,5 +143,16 @@ async function install(e: CatEntry, file?: string) {
 .h { display: flex; flex-wrap: wrap; align-items: center; gap: 0.375rem 0.5rem; }
 .tag { font-size: 0.75rem; padding: 0 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-pill); white-space: nowrap; }
 .tag.warm { border-color: var(--warm-border); color: var(--warm); }
+.pv { display: flex; flex-direction: column; gap: 0.25rem; align-items: flex-start; }
+.tracks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; align-self: stretch; }
+.cat .tracks li { border: 0; padding: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.25rem 0.5rem; }
+.tname { overflow-wrap: anywhere; }
+.tracks input[type="range"] { grid-column: 1 / 3; grid-row: 2; min-width: 0; width: 100%; }
+.clk { grid-column: 3; white-space: nowrap; grid-row: 2; min-width: 5.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+@media (min-width: 40rem) {
+  .cat .tracks li { grid-template-columns: auto minmax(8rem, 1fr) minmax(8rem, 2fr) auto; }
+  .tracks input[type="range"] { grid-column: 3; grid-row: 1; }
+  .clk { grid-column: 4; grid-row: 1; }
+}
 .desc { overflow-wrap: anywhere; }
 </style>

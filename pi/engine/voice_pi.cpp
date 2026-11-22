@@ -19,13 +19,13 @@
 namespace voice_pi {
 
 namespace {
-constexpr int kPgHome = 0, kPgSound = 1, kPgSeq = 4, kPgRytm = 5, kPgVoice = 8, kPgIns = 9, kPgSong = 10, kPgRec = 11,
+constexpr int kPgHome = 0, kPgSound = 1, kPgFx = 2, kPgSeq = 4, kPgRytm = 5, kPgVoice = 8, kPgSong = 10, kPgRec = 11,
               kPgScope = 12, kPgStatus = 13, kPgProject = 14, kPgPool = 15, kPgMorph = 20;
 // the touchscreen's pages by the device table's names (ui/page_keys.h; sidecar_ui.h's page numbers); a name not here
 // (SAMPLE) is the Rytm's screen's alone. VOICE: VoicePage (the machine view or VOICE).
 struct TouchPage { const char* name; int page; };
 constexpr TouchPage kTouch[] = {{"HOME", kPgHome}, {"SEQ", kPgSeq}, {"PAT", kPgRytm}, {"VOICE", kPgVoice}, {"SET", kPgSound},
-                                {"INSERT FX", kPgIns}, {"REC", kPgRec}, {"SCOPE", kPgScope}, {"STATUS", kPgStatus},
+                                {"FX", kPgFx}, {"REC", kPgRec}, {"SCOPE", kPgScope}, {"STATUS", kPgStatus},
                                 {"SONG", kPgSong}, {"PROJECT", kPgProject}, {"POOL", kPgPool}
 #if SIDECAR_MORPH
                                 , {"MORPH", kPgMorph}   // 0.5.0: off (core/sidecar_features.h)

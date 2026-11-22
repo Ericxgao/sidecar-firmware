@@ -841,8 +841,13 @@ ignored on both sides; spec 2.1). Everything below is answered from `loop()` bet
 - `voice_enter(state)` (`reserved[2]`) after `voice_init` each time a voice starts the slot; `voice_leave(state)`
   (`reserved[3]`) before the voice plays another machine or slot, the slot reloads or the voice is released by a sound
   tag mismatch (section 6; not for a muted slot). In `voice_leave`, `pool_info` answers EMPTY and `pool_read` 0.
-- `pool_info(slot, &info)` / `pool_read(slot, pos, buf, n)` (`rmp_host.reserved[0..1]`): the project's pool slot 1..127
-  for the voice being called. **Without PSRAM** (and before a sample is resident) the voice reads through its own DSP
+- `pool_info(slot, &info)` / `pool_read(slot, pos, buf, n)` (`rmp_host.reserved[0..1]`): the project's pool slot for
+  the voice being called. `slot` is bank A's row 1..127 (the old meaning, unchanged), or, on the Pi (0.5.1.1), the list
+  code **bank * 128 + row** (bank 0..7 = A..H, row 1..127, 128..1023; row 0 of a bank is OFF) that the SAMPLES lists
+  and the Rytm use: `rmp_pool_code(bank, row)` builds it, `rmp_pool_code_of_knob(p[k])` turns a SAMPLES knob's value
+  (the integer is the row, the fraction the bank) into one, where `(int)p[k]` is only the row. Before 0.5.1.1 a slot above
+  127 was the host's internal line (bank * 127 + row), which no plugin had a reason to compute and the lists never use.
+  The Teensy's pool is bank A: a code above 127 answers EMPTY there. **Without PSRAM** (and before a sample is resident) the voice reads through its own DSP
   SAMPLE buffers (`rmp_pool`): the first 8 KB with random access (4096 frames of 16-bit mono, 2048 of 16-bit stereo,
   1365 of 24-bit stereo), the rest streamed in order through the 16 KB ring, 8 KB a read between requests; a frame
   outside head and ring restarts the stream there (silence until refilled, ~0.75 ms a read); one sample a voice at a

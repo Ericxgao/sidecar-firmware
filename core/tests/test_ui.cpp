@@ -1110,7 +1110,7 @@ int main() {
           shown_text("T6 SONG") && shown_text("T7 REC") && shown_text("T11 SAMPLE") && shown_text("T13 POOL") &&
           shown_text("TRIG SEQ") && shown_text("FX INSERT FX") && shown_text("AMP OUT") &&
           shown_text("T+REC COPY") && shown_text("T+STOP PASTE") && shown_text("T+PLAY CLEAR"));
-    CHECK(!shown_text("T1-5,8 TOUCH") && !shown_text("T1 HOME") && !shown_text("T5 INSERT FX") && !shown_text("T8 SET"));
+    CHECK(!shown_text("T1-5,8 TOUCH") && !shown_text("T1 HOME") && !shown_text("T5 FX") && !shown_text("T8 SET"));
     CHECK(leds_on && trig_led[5] != kLedOff && trig_led[12] != kLedOff &&                       // T6 SONG, T13 POOL
           trig_led[0] == kLedOff && trig_led[4] == kLedOff && trig_led[7] == kLedOff);           // T1, T5, T8: nothing there
     png("up_map_alone.png");

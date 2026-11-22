@@ -21,7 +21,7 @@ void Fill(sidecar_voice_view_t* o, const rytm_pattern_t* pat, int pattern, bool 
 // (-1: follow the Rytm). Core 0 (the display's command, voicepick=T).
 void Pick(int track);
 // The page the Rytm asked for since *seen (sidecar_ui's page number, -1 none; *seen updated): 1 HOME, 2 SEQ, 3 PAT,
-// 4 VOICE (the machine view for a GRANULAR / WAVETABLE track, else VOICE), 5 SET, 6 INSERT FX (fx-ins: 9), 8 REC (11,
+// 4 VOICE (the machine view for a GRANULAR / WAVETABLE track, else VOICE), 5 SET, 6 FX (SEND FX, 2), 8 REC (11,
 // sidecar_rec.h), 9 SCOPE (12, sidecar_scope.h), 10 SIDECAR STATUS (13, sidecar_status.h); 7 none (SAMPLE / AUTO: the
 // Rytm's own screen, core/ui/remote.cpp). Also while on VOICE / the machine view (`voice_mode`): a track change on
 // the Rytm, or a machine change of the selected track, moves between the two as the track's machine needs (never to

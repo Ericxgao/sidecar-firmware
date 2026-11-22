@@ -67,6 +67,17 @@ bool adopt(const char* path, uint8_t* p, uint32_t n) {
 }
 #if CORE_MSAMP
 int g_nw = 0, g_nf = 0;   // the fill's wanted paths and their folders (below)
+// want() finds a repeat through this table, not by comparing the path with every one wanted before: a project load wants ~1000
+// paths in one control pass, and that scan was 10 ms of it on the Pi (2026-11-20 black box; the FIFO holds 2 ms). Open
+// addressing over g_want's indexes (+1, 0 empty), a power of two at least twice kMaxEntries, so a probe is short.
+constexpr int kWantTab = 4096;
+static_assert(kWantTab >= 2 * kMaxEntries && (kWantTab & (kWantTab - 1)) == 0, "the want table: a power of two, half empty at most");
+uint16_t g_wtab[kWantTab];
+uint32_t want_hash(const char* p) {   // FNV-1a
+  uint32_t h = 2166136261u;
+  for (; *p; ++p) h = (h ^ (uint8_t)*p) * 16777619u;
+  return h;
+}
 void abandon();
 #endif
 }  // namespace
@@ -76,6 +87,7 @@ CORE_COLD void clear() {
   abandon();
   g_nw = 0;
   g_nf = 0;
+  memset(g_wtab, 0, sizeof g_wtab);
 #endif
   drop_all();
 }
@@ -284,14 +296,16 @@ CORE_COLD void want(const char* path) {
     log(CORE_STR("store: cannot want %s (path too long)"), path ? path : "(null)");
     return;
   }
-  for (int i = 0; i < g_nw; ++i)
-    if (!strcmp(g_want[i], path)) return;
+  uint32_t h = want_hash(path) & (kWantTab - 1);
+  for (; g_wtab[h]; h = (h + 1) & (kWantTab - 1))
+    if (!strcmp(g_want[g_wtab[h] - 1], path)) return;
   if (g_nw >= kMaxEntries) {
     log(CORE_STR("store: cannot want %s (%d paths wanted already)"), path, g_nw);
     return;
   }
   g_wfold[g_nw] = (int16_t)folder_of(path);
   strcpy(g_want[g_nw++], path);
+  g_wtab[h] = (uint16_t)g_nw;   // (the index + 1)
 }
 
 CORE_COLD void fill_begin() {

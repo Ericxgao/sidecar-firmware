@@ -1,4 +1,4 @@
-# Remote UI: the Sidecar's touch screen on a Mac or iPad over the USB-C cable
+# Remote UI: the Sidecar's touch screen on another device over the USB-C cable
 
 Status: the protocol library, the Pi's service, the USB network re-check and a small command-line client (`rmt_cli`).
 Client apps are separate products, not part of this repository; the protocol below is open, anyone may write one. Step 1 ran on a Pi 5 (STATUS, INSERT FX, MASTER FX and VOICE live, on a page of its own,
@@ -111,7 +111,7 @@ getting-started path for someone who has just a Pi.
   wait.
 - **Late plug.** Unchanged. A computer that starts its USB network after the Pi chose Wi-Fi or Ethernet shows the "RESTART" prompt on a screen;
   a Pi with no screen never asks and never reboots by itself (`net=auto` takes the cable on the next boot).
-- **Getting started with just a Pi.** Plug the iPad or Mac into the Pi's USB-C port first, then power the Pi: at boot `net=auto` sees the computer's
+- **Getting started with just a Pi.** Plug the client device into the Pi's USB-C port first, then power the Pi: at boot `net=auto` sees the computer's
   USB network and takes the cable (172.31.77.1), the service opens on port 7340 and the app connects. Settings: sidecar.local (the web page) over the
   same cable, or the app's pages. Pairing: `usbtrust=1` (default) needs no code on the cable; with `usbtrust=0` the pairing code is written to the
   card's root (there is no screen to show it).

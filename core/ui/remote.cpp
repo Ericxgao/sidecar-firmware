@@ -111,6 +111,10 @@ constexpr uint32_t kPlayCommitMs = 200;
 // locks as they are turned) commits at most every kSrcUserMs while playing: twice the plain cap, half the Rytm's
 // render rate, so a turn follows the knob and a constant CC stream still does not redraw the Rytm at 20 Hz.
 constexpr uint32_t kSrcUserMs = 100;
+// The Rytm's 2B says the SRC view is covered (state bit 1: the machine list, any cover): nothing of it is drawn while it
+// is. 0026 sends a 2B every second while the view is there, so a cover not renewed for kCoverMs is taken as ended (a lost
+// 2B must never leave the view blank): one whole frame follows. No 2B at all (an older mod): never covered.
+constexpr uint32_t kCoverMs = 3000;
 constexpr uint8_t kEchoNone = 0x7F;
 // 1023: the connect splash (rytm-mods 0026 1023): the Rytm's hello (35) carries its uptime in 50 ms ticks; when it has
 // been up kSplashMinUp or more (the link came up after the Rytm's boot, not with it: a cable plugged in, the Sidecar
@@ -437,6 +441,8 @@ struct State {
   bool src_user = false;     // 0.4.4: a knob's value on the SRC view (a 2A of one value, or a held step's) since the last commit
   uint32_t commit_ms = 0;    // 0.4.3: the last page / SRC view commit (kPlayCommitMs) and what it showed (page_key)
   int commit_page = -1000;
+  bool covered = false;      // the last 2B said the SRC view is covered; cover_ms: when (the renewal is the 2B's heartbeat)
+  uint32_t cover_ms = 0;
   int touched = -1;          // the encoder turned last (0..7): its cell's tiles go first, the bottom bar names it
   uint32_t touch_ms = 0;     // 0.5.0 screens: when (they name the knob for kScreenTurnMs; touched / src_last >= 0 say it is set)
   uint32_t src_last_ms = 0;  // ... the SRC view's last changed knob
@@ -1050,6 +1056,15 @@ CORE_COLD bool commit_held(uint32_t ms) {
          ms - s.commit_ms < (s.src_user ? kSrcUserMs : kPlayCommitMs);
 }
 CORE_COLD void committed(uint32_t ms) { s.commit_ms = ms, s.user = false, s.src_user = false, s.commit_page = page_key(); }
+// The cover is over (a 2B without it, or none for kCoverMs): the Rytm's shadow is not ours any more, so one whole frame
+// and commit of what is current now go out at the next tick, not held.
+CORE_COLD void cover_ended() {
+  s.covered = false, s.sent_valid = false, s.page_changed = true, s.input = true;
+}
+CORE_COLD bool src_covered(uint32_t ms) {
+  if (s.covered && (int32_t)(ms - s.cover_ms) >= (int32_t)kCoverMs) cover_ended();   // (signed: a stamp after ms is not over)
+  return s.covered;
+}
 
 // The tiles a rectangle touches (glass rows y..y+h-1: page 7 - row / 8).
 CORE_COLD void rect_tiles(const Rect& r, uint32_t m[4]) {
@@ -1229,11 +1244,13 @@ CORE_COLD void src_tick(uint32_t ms) {
     if (p) s.sent_valid = false, s.page_changed = true, s.clock_set = false;   // the Rytm's shadow: a whole frame
   }
   if (!p) return;
+  const bool covered = src_covered(ms);   // (the engine follows the machine at once; only the drawing waits)
+  if (covered) s.sent_valid = false;
   wave_idle(ms);   // the sample overview of the Rytm's SMP being read (one column at most)
   if (!s.clock_set) s.clock_set = true, s.last_draw = ms - kTickMs, s.last_tx = ms;
   // a 2A at once (the Rytm sends one a 20 Hz tick at most; the 2As a USB read brought are taken before this tick, so a
   // burst is drawn once, with its latest values)
-  if (s.input || ms - s.last_draw >= kTickMs) {
+  if (!covered && (s.input || ms - s.last_draw >= kTickMs)) {
     s.last_draw = ms;
     s.input = false;
     if (s.page_changed) view.invalidate(), s.page_changed = false;
@@ -1866,14 +1883,20 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
         s.src_told = -1;   // a whole frame at the next tick: the Rytm shows ours only after a 39 since this 29
         s.src_last = -1;   // a splash running (a hello just before) ends first, then the view's whole frame
       } else if (b[0] == s.src_track) {
-        s.src_track = -1, s.src_told = -1;
+        s.src_track = -1, s.src_told = -1, s.covered = false;
         if (!s.open) s.sent_valid = false;   // the Rytm's own screen is back: its shadow is not ours
       }
       return;
     case kSrcDiag: {   // 1027d: logged when the state or the top view changes (or with srclog on)
       if (n < 8) break;
       static uint32_t last = 0xFFFFFFFFu;
+      const bool st_cov = b[0] & 2;
       uint32_t vt = (uint32_t)b[2] << 28 | (uint32_t)b[3] << 21 | (uint32_t)b[4] << 14 | (uint32_t)b[5] << 7 | b[6];
+      if (st_cov) s.covered = true, s.cover_ms = s.now_ms;   // (the tick's clock, as src_covered's)
+      else if (s.covered) {
+        if (s.open) s.covered = false;   // a Sidecar page is up: nothing of the SRC view to redraw
+        else cover_ended();
+      }
       machine_list(vt == kMachineListVt173 || vt == kMachineListVt174);   // rc5: the list's choice gets page 2's defaults once it closes
       uint32_t key = (uint32_t)b[0] << 24 ^ vt ^ (uint32_t)b[1] << 16;
       if (key == last && !src_log) return;
@@ -2053,6 +2076,7 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
     case kHello: {   // 1023: <uptime >> 7> <uptime & 0x7F> <caps>: the splash when the Rytm was up before the link
       s.presets_told = false;
       s.mlist = false, page_two_cancel();   // rc5: a new link: no list choice owed
+      s.covered = false;   // (the Rytm's 2B says again)
       if (n < 3) break;
       s.stats.hellos++;
       int up = b[0] << 7 | b[1];
