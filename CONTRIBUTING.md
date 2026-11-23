@@ -9,6 +9,7 @@ request.
 
 ## Before you start
 
+- **AI coding agents:** read [AGENTS.md](AGENTS.md) first. It has the build and test commands, the safety rules and the known traps.
 - **Find or open an issue first** for anything bigger than a small fix, and say you'd like to take it. Wait for a
   "go" (the `claimed` label and your name on the issue) before you build. The roadmap (trigcondition/sidecar-firmware#68, pinned; board: https://github.com/users/trigcondition/projects/3) shows what is
   planned and who is on it.

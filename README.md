@@ -101,7 +101,7 @@ the materials needed to relink the Teensy firmware with a modified LGPL part: op
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). AI coding agents: read [AGENTS.md](AGENTS.md) first.
 
 ## Licence
 
