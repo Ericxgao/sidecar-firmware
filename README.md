@@ -18,7 +18,7 @@ Rytm flash). **What 0.5.1.2 adds** since 0.5.1.1, in plain words:
   up, so a Pi that started after it never heard one and a quick UP + RIGHT did nothing. The Pi now claims the keys on the first
   Rytm message it hears, again about every 2 s, and the first hello, if one comes, decides as before. A box other than the
   Rytm is not affected.
-- **The CONNECTED screen no longer stays up** after the Rytm connects until you open the Sidecar menu.
+- **The CONNECTED screen no longer stays up or comes back** after the Rytm connects.
 - **/status** shows `hellos` (how many hellos the Pi has heard) and `capsKnown` (whether it knows the Rytm's capabilities).
   The log says once per link that they are unknown.
 
