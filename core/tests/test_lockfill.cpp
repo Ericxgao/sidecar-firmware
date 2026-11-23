@@ -1033,6 +1033,29 @@ int main() {
       send(msg(0x35, {0, 6, 127, ui::kCaps2Arrows}));   // (the tests go on with the keys claimed)
       CHECK(sent(claim));
     }
+    // the claim again about every 2 s while linked (a quick UP + RIGHT after a port drop): no key traffic needed, no flood
+    {
+      ui::remote_reset();
+      const uint32_t t = now_ms() + 100000;
+      ui::remote_tick(t);
+      send(msg(0x35, {0, 6, 127, ui::kCaps2Arrows}));
+      g_out.clear();
+      ui::remote_tick(t + 1000);
+      CHECK(!sent(claim));   // (the hello's claim just went)
+      ui::remote_tick(t + 2100);
+      CHECK(sent(claim));
+      g_out.clear();
+      for (int i = 1; i <= 10; ++i) ui::remote_tick(t + 2100 + i * 100);
+      CHECK(!sent(claim));
+      ui::remote_tick(t + 4200);
+      CHECK(sent(claim));
+      cmd("fill=keys:off");
+      g_out.clear();
+      ui::remote_tick(t + 9000);
+      CHECK(!sent(claim));
+      cmd("fill=keys:on");   // (the tests go on with the keys claimed)
+      CHECK(sent(claim));
+    }
     // the tracks: BD PLAITS, the rest Rytm machines
     std::vector<uint8_t> a33 = {0, 12};
     a33.push_back(1), a33.push_back(0x00);

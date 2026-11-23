@@ -1495,7 +1495,7 @@ CORE_COLD void fill_claim() {   // (L7: only a build with the FILL page claims t
   if (g_fill_keys_off) return;
   const uint8_t m[9] = {0xF0, 0x7D, 0x52, 0x54, 0x4A, 1, 0x7E, 1, 0xF7};
   to_rytm(m, 9);
-  g_fill_claimed = true;
+  g_fill_claimed = true, g_claim_ms = s.now_ms;
 #endif
 }
 CORE_COLD void fill_unclaim() {
@@ -2176,6 +2176,8 @@ static CORE_COLD void key_repeat_tick(uint32_t ms) {
 
 CORE_COLD void remote_tick(uint32_t ms) {
   if (g_going_down && !g_fill_keys_off) g_fill_keys_off = true, fill_unclaim();   // (a planned reboot: remote.h)
+  // the claim again every ~2 s while linked (the Rytm drops it at each USB port drop; a 4A 7E 1 only sets its flag)
+  if (g_fill_claimed && !g_going_down && (int32_t)(ms - g_claim_ms) >= 2000) fill_claim(), g_claim_ms = ms;
   if (!s.presets_told && s.src_track >= 0) {
     int m = track_machine(s.src_track);
     if (m == core::kJuno || m == core::kFm) {
