@@ -40,6 +40,7 @@ static bool leds_on = false;
 static bool caught(int code) { return mask_key[code & 0xFF]; }
 static void terminal(const uint8_t* d, int len) {
   if (len == 7 && d[4] == 0x26) return;   // the IN L/R source ask on the first message (host_link.cpp, fxin): not the remote UI's
+  if (len == 9 && d[4] == 0x4A && d[5] == 1 && d[6] == 0x7E && d[7] == 1 && d[8] == 0xF7) return;   // the FILL claim (4A 7E 1) of Rytm traffic before any hello, then every 2 s: not the page's
   if (len < 7 || d[0] != 0xF0 || d[1] != 0x7D || d[2] != 0x52 || d[3] != 0x54 || d[5] != 1 || d[len - 1] != 0xF7) {
     other.emplace_back(d, d + len);
     return;
@@ -435,7 +436,11 @@ int main() {
   CHECK(!remote_open() && splash_msgs == sm0 + 1);
   for (uint32_t t = 24520; t < 28000; t += 10) remote_tick(t);
   CHECK(splash_last == 0);
-  CHECK(other.empty() && !bad);   // nothing but remote-UI messages went out, all well formed
+  // nothing but remote-UI messages went out, all well formed; the only ones outside the counters are the 3A 0 0 that
+  // follows each splash whose page was closed (splash-shadow)
+  bool only_close = true;
+  for (auto& m : other) only_close = only_close && m.size() == 9 && m[4] == 0x3A && m[6] == 0 && m[7] == 0;
+  CHECK(only_close && !bad);
 
   // ---- the voice pages follow the machine the Rytm's track plays, as its reports name it (the voice byte), live:
   // nothing reported yet (an analog track, or one just set on the SRC page: 0021 reports a voice only while it sounds)
@@ -776,8 +781,52 @@ int main() {
   for (int i = 0; i < 10; ++i) remote_tick(t += 30);
   CHECK(splash_msgs == sp0 + 1 && splash_last == 64);   // the splash, not blocked by the stale page / view
   r1 = rects;
+  other.clear();
   for (int i = 0; i < 120; ++i) remote_tick(t += 30);   // past its 3 s: 36 0, then the view
   CHECK(splash_last == 0 && remote_stats().page == 4 && rects - r1 >= 8 && shown_text("JUNO") && shown_text("BD"));
+  // splash-shadow (b): a track with a SRC page: no 3A 0 0 at the splash end (the Rytm would apply it at its next UI
+  // tick and hide the view's first frame too); the view's whole frame replaces the shadow's CONNECTED
+  CHECK(sent_cmd(0x3A) == 0);
+  src_view(0, 0);
+  // splash-shadow (a): a track with no page (BT, analog): the splash ends with one 3A 0 0 and no frame, else the Rytm
+  // shows the shadow's CONNECTED at the next host message
+  from_rytm(0x30, 0, 0, 0);
+  remote_tick(t += 100);
+  from_rytm(0x35, 0, 100, 1);
+  src_view(4, 1);
+  other.clear(), reset_counts();
+  for (int i = 0; i < 150; ++i) remote_tick(t += 30);
+  CHECK(splash_last == 0 && sent_cmd(0x3A) == 1 && !other.empty() && other.back()[4] == 0x3A && other.back()[6] == 0 && other.back()[7] == 0);   // (the 47s of the hello come before)
+  r1 = rects, c1 = commits;
+  other.clear();
+  for (int i = 0; i < 10; ++i) remote_tick(t += 30);
+  CHECK(other.empty() && rects == r1 && commits == c1);   // and nothing more
+  src_view(4, 0);
+  // splash-shadow (c): the user's page open when the splash ends: it shows its own frame, no 3A 0 0
+  from_rytm(0x35, 0, 100, 1);
+  from_rytm(0x30, 0, 1, 0);
+  other.clear();
+  for (int i = 0; i < 150; ++i) remote_tick(t += 30);
+  CHECK(splash_last == 0 && remote_open() && sent_cmd(0x3A) == 0);
+  from_rytm(0x30, 0, 0, 0);
+  remote_tick(t += 100);
+  // link-reset (a): BD on 6-OP FM reported; the Rytm restarts (a second hello) and its 33 says BD is on JUNO now. The
+  // voice re-seeds from that snapshot, as at the Pi's own boot (voices.cpp reported[] cleared by a later hello)
+  report_machine(0, core::kFm);
+  CHECK(core::v[0].fm && !core::v[0].juno);
+  from_rytm(0x35, 0, 1, 1);
+  const uint8_t juno_bd2[2] = {41, 0x08};
+  machines(0, 1, juno_bd2);
+  CHECK(core::v[0].juno && !core::v[0].fm);
+  // link-reset (b): the SRC view of a track with a page, after a restart too quick for a splash (up 1 s): a whole frame
+  src_view(0, 1);
+  for (int i = 0; i < 20; ++i) remote_tick(t += 30);
+  src_view(0, 0);
+  from_rytm(0x35, 0, 20, 1);
+  src_view(0, 1);
+  r1 = rects, other.clear();
+  for (int i = 0; i < 20; ++i) remote_tick(t += 30);
+  CHECK(rects - r1 >= 8 && shown_text("JUNO") && sent_cmd(0x3A) == 0);
   src_view(0, 0);
   // the Rytm has the SRC view (it sent 29 / 2A): TRK + YES lists SIDECAR, SYSTEM and the live pages, no voice page
   // (BD and SD are on JUNO, CP on 6-OP FM: an older build listed them)
