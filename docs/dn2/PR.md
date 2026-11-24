@@ -1,8 +1,9 @@
 # Add a Digitone II host profile with eight native parts
 
-Draft PR body for `trigcondition/sidecar-firmware:dev`. Not posted. The maintainer's
-issue/claim workflow still applies; no issue has been claimed for this proposal.
-The companion DN2MK2 source contribution must be linked when submitting.
+Possible future PR body for `trigcondition/sidecar-firmware:dev`; no Pi PR is
+being submitted at this stage. This branch is shared for adoption discussion,
+not as a commitment by its author to maintain a supported DN2 edition. The
+maintainer's issue workflow applies if someone adopts the contribution.
 
 ## What and why
 

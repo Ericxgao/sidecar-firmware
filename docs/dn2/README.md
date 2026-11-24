@@ -11,6 +11,12 @@ The update preserves upstream's pool-code helpers, voice report reset on
 reconnect and USB timing diagnostics. This is not a firmware release or a claim
 that this extracted tree has been booted on hardware.
 
+This branch is an experimental personal-use integration shared for possible
+upstream adoption. It is not an officially supported DN2 edition, and its author
+does not promise ongoing rebases, releases or support. The DN2MK2 endpoint is a
+separate contribution; users currently need both modified codebases. See the
+[adoption discussion](ISSUE.md). Private engines are not needed for the public demo.
+
 ## Review boundaries
 
 - Core loader: return retired executable/writable pages and support eight
