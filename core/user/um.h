@@ -16,6 +16,7 @@
 //            at once and a write goes through Exec::write_file.
 #pragma once
 #include <stdint.h>
+#include "rmp_slots.h"
 
 #include "rmp_api.h"
 
@@ -44,6 +45,10 @@ struct Exec {
   // is the board's, as before API 3).
   int (*guard)(void (*fn)(void*), void* ctx, uint64_t* pc);
   uint32_t board;                        // rmp3_host.board: 4 or 5 on a Pi, 0 elsewhere
+  // Optional per-image reclamation, after every voice/effect has left the image.
+  // Without these callbacks the corresponding arena retains its reset-only behavior.
+  void (*release)(uint8_t* p, uint32_t bytes);
+  void (*data_release)(uint8_t* p, uint32_t bytes);
 };
 
 // API 2 pool_info / pool_read: the pool line (1..npool, bank * 127 + row) a plugin's slot argument names. Two spellings:
@@ -56,7 +61,7 @@ int32_t test_pool_info(int vi, int32_t slot, rmp_pool_info* info);
 int32_t test_pool_read(int vi, int32_t slot, uint32_t pos, float* buf, int32_t n);
 bool test_pool_pass();
 
-constexpr int kSlots = 5;
+constexpr int kSlots = RMP_SLOTS;
 constexpr int kStore = 32;               // packages listed (the Rytm's list holds 32)
 constexpr uint32_t kStateMax = 65536;    // a voice's plugin state at most (the Teensy's is 16 KB without PSRAM)
 constexpr int kArenaStates = 40;         // API 3: an arena's states at most (8 voices + 32 poly instances)
@@ -74,8 +79,8 @@ void render_fault(int vi);
 // Host tests: one API 3 control call over this many us mutes its slot at once (0: the FIFO's 2 ms again).
 void call_stall_limit(uint32_t us);
 void rescan();              // the card's packages changed (the web's upload / delete)
-// Console: "um" (the list in the log), "um=rescan", "um=assign:<slot 1..5>:<id>" (the installed version, current
-// project), "um=clear:<slot>" (explicitly empty), "um=empty" (start this project empty: all five),
+// Console: "um" (the list in the log), "um=rescan", "um=assign:<slot 1..kSlots>:<id>" (the installed version, current
+// project), "um=clear:<slot>" (explicitly empty), "um=empty" (start this project empty),
 // "um=put:<slot>:<id|->:<a.b.c>[:<name>]" (an imported slot list's entry; the package need not be installed).
 // "um=reload:<slot>" (API 3: load the slot again: a muted slot back, its states and arena fresh; "f<n>": UFX<n>).
 // "um=fx:<n>:<id|->" (API 3: user effect slot UFX<n>, 1..4, plays the installed effect id, or none; in memory).
@@ -102,7 +107,7 @@ struct SlotView {
   uint32_t arena;        // the slot's arena, bytes (shared part + states x voice part)
   const char* why;       // the JSON's "why" ("" none)
 };
-SlotView slot_view(int s);  // s 0..4 (U1..U5), 5..8 (API 3's UFX1..UFX4); state an rmp_slot_state
+SlotView slot_view(int s);  // machines 0..kSlots-1, then four UFX slots; state an rmp_slot_state
 // The display's view (any core: published with the JSON, the same seqlock): the project and U1..U5 as the Rytm shows
 // them - the machine's name, "---" empty, "!NAME" missing / bad / no room, "..." loading. False before the first publish.
 struct UiView {
@@ -111,6 +116,17 @@ struct UiView {
 };
 bool ui_view(UiView* out);
 bool tag_ok(int slot, int tag);   // slot (0..4) is ready and holds the plugin of this sound tag
+// Control core only, no I/O: a ready machine slot's manifest defaults, unused P's zero.
+// Used by the stock-MIDI note adapter when selecting u1..u5. False leaves values untouched.
+bool slot_defaults(int slot, uint8_t values[16]);
+// Control core only. Full plugin ID lookup, ready/unmuted machines only, no I/O.
+int ready_slot(const char* id);
+// Session admission only: any ready machine. Individual events still resolve
+// the complete saved plugin ID and never fall back to this slot.
+int first_ready_slot();
+// A native host note on the voice's current user machine, keeping fractional
+// pitch/velocity through deferred preset loads. Velocity is normalized 0..1.
+bool native_note_on(int vi, float note, float velocity);
 // E0 (core/inst.h): a user machine's instances on voice vi. i: the instance's index in core::inst's pool (0..31),
 // each its own state of the package voice vi's slot plays (voice_init / voice_enter on its first note there,
 // voice_leave when the slot's image changes or inst_stop), the voice's params as the voice's own state gets them (its
@@ -133,6 +149,7 @@ int presets(int s);                               // the slot's presets as scann
 const char* preset_name(int s, int i);            // "" unknown (the names held are another slot's)
 uint8_t store_gen();
 uint32_t code_epoch();      // bumped whenever plugin code is placed (any slot's load): any core may read it
+uint32_t slot_epoch(int slot); // control core: this slot's lifecycle, independent of unrelated loads
 
 // 2026-10-27 (core/bundle/prjslot.h): the slot map's next writes under another project key (a SAVE AS copy placed)
 void rekey(const char* key);

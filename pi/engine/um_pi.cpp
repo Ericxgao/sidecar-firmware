@@ -14,6 +14,7 @@
 #include "fmt/fmt.h"
 #include "guard.h"
 #include "user/um.h"
+#include "user/page_arena.h"
 
 static const char From[] = "um";
 
@@ -21,7 +22,7 @@ static const char From[] = "um";
 static const unsigned ArenaSize = 4 << 20;
 static const unsigned Page = 64 * 1024;		// Circle's AArch64 granule (translationtable64.cpp)
 static u8 *s_pArena = 0;
-static unsigned s_nUsed = 0;
+static um::PageArena<ArenaSize> s_CodePages;
 
 // Circle's table: TTBR0_EL1 -> a level-2 table (512 MB an entry) -> level-3 tables (8192 pages of 64 KB). The kernel
 // maps everything from _etext up PXN (never executable at EL1); the arena's pages get PXN cleared, the TLB entries
@@ -49,13 +50,10 @@ static boolean MakeExecutable (uintptr nStart, uintptr nEnd)
 
 static u8 *Alloc (u32 nBytes)
 {
-	nBytes = (nBytes + 4095) & ~4095u;
-	if (!s_pArena || nBytes > ArenaSize - s_nUsed) return 0;
-	u8 *p = s_pArena + s_nUsed;
-	s_nUsed += nBytes;
-	return p;
+	return s_CodePages.alloc (s_pArena, nBytes);
 }
-static void Reset (void) { s_nUsed = 0; }
+static void Reset (void) { s_CodePages.reset (); }
+static void Release (u8 *p, u32 n) { s_CodePages.release (s_pArena, p, n); }
 // The code just written: each D-cache line cleaned to the point of unification, then each I-cache line invalidated
 // (both broadcast to the inner-shareable domain: the render cores), then this core's pipeline (isb).
 static void Sync (void *p, u32 nBytes)
@@ -72,7 +70,7 @@ static void Sync (void *p, u32 nBytes)
 static void Barrier (void) { asm volatile ("isb" ::: "memory"); }
 
 // ---- small card writes (the slot maps), done by a core-0 task: the control core never waits on a card write
-static const unsigned WriteMax = 512;
+static const unsigned WriteMax = 1024;
 struct TWrite { char path[64]; char data[WriteMax]; unsigned n; };
 static TWrite s_Write[4];
 static volatile unsigned s_nWriteHead = 0, s_nWriteTail = 0;	// a ring: core 3 writes the head, core 0 the tail
@@ -133,7 +131,7 @@ static int GuardCall (void (*pFunc) (void *), void *pParam, uint64_t *pPC)
 	return r;
 }
 
-static um::Exec s_Exec = {Alloc, Reset, 0, Sync, Barrier, ArenaSize, QueueWrite, 0, PlugPool, GuardCall, RASPPI};
+static um::Exec s_Exec = {Alloc, Reset, 0, Sync, Barrier, ArenaSize, QueueWrite, 0, PlugPool, GuardCall, RASPPI, Release, 0};
 
 // The heap for the hosted um (the package buffer, the data arena, the voices' state): Circle's, at boot only.
 extern "C" void *um_heap (u32 nBytes) { return new u8[nBytes]; }

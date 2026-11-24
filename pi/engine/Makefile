@@ -157,7 +157,7 @@ print-flags:
 # RYTM_RENDER_CORES=4: the render state voices share is per core (cores 1 and 2 render at once; rytm_render_core() in
 # platform_pi.cpp): a 6-OP FM reload's stage and bank pointer, GRAIN's budget, stmlib's Random and rand(). Every
 # hosted object needs the same value (the per-core arrays are inline functions' statics).
-HOSTED_FLAGS = $(ARCH) -DRYTM_RENDER_CORES=4 -DCORE_POLY=1 -DCORE_MSAMP=1 -O2 -std=gnu++17 -fsigned-char -fno-exceptions -fno-rtti -fno-threadsafe-statics \
+HOSTED_FLAGS = $(ARCH) -DSIDECAR_EIGHT_ENGINES -DRYTM_RENDER_CORES=4 -DCORE_POLY=1 -DCORE_MSAMP=1 -O2 -std=gnu++17 -fsigned-char -fno-exceptions -fno-rtti -fno-threadsafe-statics \
 	-fno-math-errno -ffp-contract=fast -ffunction-sections -fdata-sections -g -MMD -MP -I. -I$(CORE) -I$(RMPSRC) -DRMP_HOST_A64 $(ENG_INC) $(ENG_FLAGS) \
 	$(if $(SEQED),-DSIDECAR_SEQED=1,)
 HOSTED_CFLAGS = $(ARCH) -O2 -std=c99 -fno-math-errno -ffp-contract=fast -g -MMD -MP -w $(ENG_INC)

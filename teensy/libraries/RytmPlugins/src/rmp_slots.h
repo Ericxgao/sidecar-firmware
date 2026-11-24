@@ -4,7 +4,13 @@
 #pragma once
 #include <stdint.h>
 #include "rmp_loader.h"
+// A64 hosts have eight resident machine images. The Rytm wire protocol and
+// voice-flag encoding still expose only U1..U5; DN2 resolves full IDs directly.
+#if defined(SIDECAR_EIGHT_ENGINES) || defined(RASPPI)
+#define RMP_SLOTS 8
+#else
 #define RMP_SLOTS 5
+#endif
 #define RMP_VOICES 8
 struct rmp_slot_entry { char id[32]; uint32_t version; };   // id[0] == 0: slot empty; version a << 16 | b << 8 | c
 struct rmp_slot_map { rmp_slot_entry slot[RMP_SLOTS]; };

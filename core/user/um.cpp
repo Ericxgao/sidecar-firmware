@@ -1,6 +1,8 @@
 // core/user/um.cpp - see um.h. Control core only, but user_render (a render core) and json_copy (any core).
 #include "../engine.h"   // idle_note (7z)
 #include "um.h"
+#include "page_arena.h"
+#include "native_catalog.h"
 #include "inst.h"
 
 #include <string.h>
@@ -139,6 +141,8 @@ struct V3 {
   const rmp3_plugin* p3;   // null: a plain API 1 / 2 plugin
   const uint8_t* code;     // the image's code part (the fault offsets: "+0x1234")
   uint32_t code_bytes;
+  uint8_t* data;
+  uint32_t data_bytes;
   uint8_t* base;           // the arena: one block from the pool (null: none), zeroed by the arena phase
   uint8_t* shared;         // ... the slot's shared part (null: 0 bytes)
   uint8_t* voices;         // ... then states x voice_bytes
@@ -206,7 +210,7 @@ constexpr uint32_t kSetupCallsMax = 4000;
 // code's arena (a full reload, only when the free space is there but in pieces)
 uint8_t* g_pool = nullptr;
 uint32_t g_pool_bytes = 0, g_pool_used = 0;
-constexpr int kFree = 16;
+constexpr int kFree = kAll + 1; // At most one free gap between live slot arenas.
 struct FreeBlk { uint8_t* base; uint32_t cap; };
 FreeBlk g_free[kFree];
 int g_nfree = 0;
@@ -229,6 +233,12 @@ char g_why[kAll][64];    // why the slot is not READY, in words (the web page's 
 uint32_t g_need = 0;       // slots to (re)load, bit s
 bool g_full = false;       // reset the arena and load every slot again
 uint32_t g_arena_used = 0;
+uint32_t g_slot_epoch[kAll]{};
+uint32_t g_native_load_mask = 0; // native requests may not interrupt other slots by compacting all images
+char g_native_ids[core::kVoices][32]{}; // committed part identities, including not-yet-playing parts
+uint32_t g_native_pending = 0, g_native_due = 0;
+unsigned g_native_cursor = 0;
+bool g_native_kick = false;
 uint32_t g_epoch = 1;      // bumped after code is placed (render cores' barrier)
 uint32_t g_voice_epoch[8];   // the epoch each voice last rendered at (a barrier when it moved on)
 // the load under way
@@ -504,7 +514,7 @@ void meta_poll() {
     // with the same labels would print the same), and its 1B answers from the set shown
     int k = find_slot(s);
     uint32_t lp = k >= 0 && g_pkg[k].lbl.nsets ? (uint32_t)(lbl_shown(s, g_pkg[k]) + 2) * 0x85EBCA6Bu : 0u;
-    if (rmp_meta_set(&g_meta, s, rmp_meta_print(st, slot_flags(s), e.id, e.version, p) ^ g_pre_fp[s] * 2654435761u ^
+    if (s < RMP_META_SLOTS && rmp_meta_set(&g_meta, s, rmp_meta_print(st, slot_flags(s), e.id, e.version, p) ^ g_pre_fp[s] * 2654435761u ^
                                      (uint32_t)rmp_why_of(st, RMP_WHY_NONE) * 0x9E3779B1u ^ lp))
       g_pub = true;
   }
@@ -528,6 +538,7 @@ void send_1d(int slot, int result) {
   g_1d_sent = true;
 }
 void send_meta(int s) {
+  if (s < 0 || s >= RMP_META_SLOTS) return;
   uint8_t m[RMP_MSG_MAX];
   rmp_desc d;
   const rmp_desc* p = slot_desc(s, &d);
@@ -557,6 +568,7 @@ void send_meta(int s) {
   for (int part = 1; p && part < rmp_meta_nparts(p); ++part) core::to_rytm(m, rmp_build_meta_part(m, s + 1, g, part, p));
 }
 void send_enum(int s, int arg) {
+  if (s < 0 || s >= RMP_META_SLOTS) return;
   char names[RMP_ENUM_MAX][8];
   int n = 0;
   int k = find_slot(s);
@@ -637,7 +649,7 @@ uint8_t g_pre_page[kSlots];                // name pages asked for (19 what 2): 
 uint8_t g_pv_new = 0, g_pv_wait = 0, g_last_trig = 0, g_pv_resync = 0;   // bit vi
 struct PreLoad { bool on; int8_t s; uint8_t gen; int16_t entry; bool sync; float p[16]; uint8_t seq; };   // seq: moves with each new decision
 PreLoad g_pl[core::kVoices][2];            // [0] the sound's own preset (written back), [1] a p-lock's play
-struct HeldNote { uint8_t note, vel; bool held; uint32_t t; };
+struct HeldNote { float note, vel; bool held; uint32_t t; };
 HeldNote g_hn[core::kVoices];              // a trig's note_on held until its preset load ran
 uint8_t g_note_wait = 0;                   // bit vi: silent meanwhile
 constexpr uint32_t kNoteHoldUs = 2000;     // a held note plays by then, loaded or not
@@ -1059,6 +1071,7 @@ bool pscan_busy() { return g_pscan_slot >= 0 || g_pscan_todo; }
 #endif
 // 1B 0x20: page p of slot s's names (16 a page), only while the shared names are the slot's.
 void send_presets(int s, int page) {
+  if (s < 0 || s >= RMP_META_SLOTS) return;
   const rmp_preset_names& l = g_pnames;
   uint8_t m[RMP_MSG_MAX];
   int from = page * 16, to = from + 16 < l.n ? from + 16 : l.n;
@@ -1132,10 +1145,10 @@ void note_fire(int vi) {   // a trig's held note_on, now
   const HeldNote& n = g_hn[vi];
   {
     VNow now(vi);
-    c_note_on(s, g_vstate[vi], (float)n.note, (n.vel < 1 ? 1 : n.vel) / 127.0f);
+    c_note_on(s, g_vstate[vi], n.note, n.vel);
   }
   core::v[vi].live = !muted(s);
-  if (n.held) core::log("um: trig voice %d U%d note %d (after its preset load: %u us)", vi, s + 1, n.note,
+  if (n.held) core::log("um: trig voice %d U%d note %d (after its preset load: %u us)", vi, s + 1, (int)n.note,
                         (unsigned)(core::now_us() - n.t));
 }
 // A pending load of voice vi that cannot run now (L.on cleared, as for any load taken): the voice moved on, or the list
@@ -1300,14 +1313,14 @@ bool pre_pass() {
 }
 // Preset names asked for: sent while the shared names are the slot's, else its folder scanned first.
 bool pre_pages() {
-  for (int s = 0; s < kSlots; ++s) {
+  for (int s = 0; s < RMP_META_SLOTS; ++s) {
     if (!g_pre_page[s] || !rmp_preset_names_ok(&g_pnames, &g_pix[s], s)) continue;
     int pg = __builtin_ctz(g_pre_page[s]);
     g_pre_page[s] &= (uint8_t)~(1u << pg);
     send_presets(s, pg);
     return true;
   }
-  for (int s = 0; s < kSlots; ++s) {
+  for (int s = 0; s < RMP_META_SLOTS; ++s) {
     if (!g_pre_page[s]) continue;
     if (!g_map.slot[s].id[0]) {   // nothing assigned: no presets
       g_pre_page[s] = 0;
@@ -1435,7 +1448,7 @@ void on_prints(const uint8_t* d, int len) {
   g_prints = p;
   g_prints_pending = true;   // applied from idle(), once the package list is there
 }
-void on_report(int vi, int s, int was, int note, int vel, int tag) {
+void on_report_precise(int vi, int s, int was, float note, float vel, int tag) {
   core::V& x = core::v[vi];
   if (note >= 0 && tag && (g_slot[s].st != RMP_SLOT_READY || tag != g_slot[s].fp)) lazy_tag(s, tag);
   if (g_cur[vi] >= 0 && g_cur[vi] != s) voice_leave(vi);
@@ -1487,11 +1500,14 @@ void on_report(int vi, int s, int was, int note, int vel, int tag) {
   }
   if (note >= 0) {
     bool held = g_pl[vi][0].on || g_pl[vi][1].on || (g_pv_wait >> vi & 1);
-    g_hn[vi] = HeldNote{(uint8_t)note, (uint8_t)vel, held, core::now_us()};
+    g_hn[vi] = HeldNote{note, vel, held, core::now_us()};
     g_note_wait |= bit;
     x.live = true;   // renders silence until the note plays (on_render)
     if (!held) note_fire(vi);
   }
+}
+void on_report(int vi, int s, int was, int note, int vel, int tag) {
+  on_report_precise(vi, s, was, (float)note, (vel < 1 ? 1 : vel) / 127.0f, tag);
 }
 void on_leave(int vi) {
   if (g_cur[vi] >= 0) voice_leave(vi);
@@ -1658,7 +1674,7 @@ void fx_take(const char* b, int n) {
 #if CORE_MSAMP
 cardq::Req g_mrq;
 char g_mr_map[64], g_mr_notes[64], g_mr_fx[64];   // the files read (g_map_file, g_notes_file, g_fx_file once all are here)
-char g_mr_b[2][512];
+char g_mr_b[2][1024];
 char g_mr_fxb[kFxRaw + 1];   // (one byte more: a file over kFxRaw shows)
 int g_mr_n[3];
 // The map's read, a request a file (kSmallReq: recover, open, read, close): the map, the notes, then both taken at once.
@@ -1710,7 +1726,7 @@ void map_read() {
   map_file(g_map_file, sizeof g_map_file);
   notes_file(g_notes_file, g_map_file, sizeof g_notes_file);
   fx_file(g_fx_file, g_map_file, sizeof g_fx_file);
-  char b[512], nb[512], fb[512];
+  char b[1024], nb[1024], fb[512];
   core::fmt::recover(g_map_file);     // 0.3.0: a cut between write_atomic's renames - the previous map back (fmt.h)
   core::fmt::recover(g_notes_file);
   core::fmt::recover(g_fx_file);
@@ -1740,10 +1756,10 @@ bool map_save() {   // the map (what an older build reads), then the notes
     core::log("um: %s not written: it did not parse (the slots change in memory only)", g_map_file);
     return false;
   }
-  char txt[400];
+  char txt[512];
   uint32_t n = rmp_slots_format(&g_map, txt, sizeof txt);
   bool ok = write_whole(g_map_file, txt, n);
-  char nt[512];   // the notes only next to a written map (an "empty" note beside an old map would be stale)
+  char nt[1024];   // the notes only next to a written map (an "empty" note beside an old map would be stale)
   n = rmp_notes_format(&g_notes, nt, sizeof nt);
   if (ok && !g_notes_locked && !write_whole(g_notes_file, nt, n)) core::log("um: %s not written", g_notes_file);
   g_fresh = false;
@@ -2231,9 +2247,10 @@ bool scan_step() {
 }
 #endif
 
-// ---- the writable parts of the images (data + bss): a bump arena of 4096-aligned blocks, reset with the code's
+// ---- Reusable image data pages; separate from the executable arena.
 constexpr uint32_t kDataArena = 4u << 20;
 uint8_t* g_data = nullptr;
+PageArena<kDataArena> g_data_pages;
 uint32_t g_data_used = 0;
 uint8_t* data_alloc(uint32_t bytes) {
   if (ex->data_alloc) {
@@ -2246,10 +2263,32 @@ uint8_t* data_alloc(uint32_t bytes) {
     if (!raw) return nullptr;
     g_data = (uint8_t*)(((uintptr_t)raw + RMP_A64_ALIGN - 1) & ~(uintptr_t)(RMP_A64_ALIGN - 1));
   }
-  if (bytes > kDataArena - g_data_used) return nullptr;
-  uint8_t* r = g_data + g_data_used;
-  g_data_used += bytes;
+  uint8_t* r = g_data_pages.alloc(g_data, bytes);
+  if (r) g_data_used += bytes;
   return r;
+}
+
+// Called only after slot_stop/fx_stop, or a load failure before publication.
+// Every slot holds a reference, including API 2 aliases and a stuck FX render.
+void arena_release(int s);
+void image_release(int s) {
+  V3& x = g_v3[s];
+  if (!x.code || (s >= kSlots && g_fx_dead[s - kSlots])) return;
+  bool shared = false;
+  for (int t = 0; t < kAll; ++t)
+    if (t != s && g_v3[t].code == x.code) { shared = true; break; }
+  if (!shared) {
+    if (ex->release) {
+      ex->release(const_cast<uint8_t*>(x.code), x.code_bytes);
+      g_arena_used -= x.code_bytes;
+    }
+    if (x.data) {
+      if (ex->data_alloc) {
+        if (ex->data_release) { ex->data_release(x.data, x.data_bytes); g_data_used -= x.data_bytes; }
+      } else if (g_data_pages.release(g_data, x.data, x.data_bytes)) g_data_used -= x.data_bytes;
+    }
+  }
+  x.code = nullptr; x.code_bytes = 0; x.data = nullptr; x.data_bytes = 0;
 }
 
 // ---- a user effect's labels on the Rytm's SEND FX page (0x24, core/fx/knob_labels.h), from its manifest: knob p 1..4
@@ -2335,6 +2374,7 @@ void fx_labels_build(int u, int pkg) {
 
 // ---- loading a slot
 void slot_set(int s, rmp_slot_state st, const rmp_plugin* p, int pkg) {
+  if (!++g_slot_epoch[s]) ++g_slot_epoch[s];
   Slot& sl = g_slot[s];
   sl.st = st, sl.p = p, sl.pkg = pkg;
   g_why[s][0] = 0;
@@ -2353,6 +2393,11 @@ void slot_set(int s, rmp_slot_state st, const rmp_plugin* p, int pkg) {
 }
 void job_end(int s, rmp_slot_state st, const rmp_plugin* p, int pkg, const char* what) {
   jf_close();
+  if (st != RMP_SLOT_READY) {
+    arena_release(s);
+    image_release(s);
+    g_v3[s] = V3{};
+  }
   slot_set(s, st, p, pkg);
   if (st != RMP_SLOT_READY) sniprintf(g_why[s], sizeof g_why[s], "%s: %s", st == RMP_SLOT_NO_ROOM ? "no room" : "bad", what);
   g_job = -1;
@@ -2717,6 +2762,17 @@ void arena_release(int s) {
   uint8_t* b = x.base;
   uint32_t c = x.cap;
   x.base = nullptr, x.cap = 0;
+  // Merge neighbours before returning the top or recording a hole. Repeated
+  // differently-sized swaps must not consume free-list entries indefinitely.
+  for (int k = 0; k < g_nfree;) {
+    FreeBlk f = g_free[k];
+    if (b + c == f.base || f.base + f.cap == b) {
+      if (f.base < b) b = f.base;
+      c += f.cap;
+      g_free[k] = g_free[--g_nfree];
+      k = 0;
+    } else ++k;
+  }
   if (b + c == g_pool + g_pool_used) {
     g_pool_used -= c;
     for (bool again = true; again;) {   // free blocks now at the top go back too
@@ -2783,7 +2839,7 @@ bool v3_start(int s) {
   uint32_t need = 0;
   if (!arena_reserve(s, &need)) {
     // the free space is there, but in pieces: start over (a full reload packs the arenas), else NO ROOM
-    if (need <= arena_limit() && g_nfree && pool_free() >= need) {
+    if (!ex->release && !(g_native_load_mask >> s & 1u) && need <= arena_limit() && g_nfree && pool_free() >= need) {
       core::log("um: %s%d %s: the arena pool is in pieces (%u KB free in all): every slot loads again", slot_pfx(s),
                 slot_no(s), entry_of(s).id, (unsigned)(pool_free() >> 10));
       g_full = true;
@@ -2853,9 +2909,16 @@ void arena_step() {
 // Starts slot s's load, or settles it at once (empty, missing, shared). True when a job runs.
 bool job_begin(int s) {
   const rmp_slot_entry& m = entry_of(s);
-  if (s >= kSlots) fx_stop(s - kSlots);
-  else slot_stop(s);
+  if (s >= kSlots) {
+    fx_stop(s - kSlots);
+    if (g_fx_dead[s - kSlots]) {
+      slot_set(s, RMP_SLOT_BAD, nullptr, -1);
+      copy(g_why[s], "bad: effect render has not stopped", sizeof g_why[s]);
+      return false; // Its image and arena must remain pinned.
+    }
+  } else slot_stop(s);
   arena_release(s);   // (API 3: its arena block back for any load it fits)
+  image_release(s);
   g_v3[s] = V3{};     // (a fresh start: no table, no arena, not muted)
   __atomic_and_fetch(&g_muted, ~(1u << s), __ATOMIC_RELEASE);
   g_late[s] = 0, g_late_n[s] = 0;
@@ -2884,6 +2947,8 @@ bool job_begin(int s) {
         sniprintf(g_why[s], sizeof g_why[s], "bad: %s", w);
         return false;
       }
+      g_v3[s].data = g_v3[t].data;
+      g_v3[s].data_bytes = g_v3[t].data_bytes;
       if (g_v3[t].p3) {   // API 3: the image shared, the arena and setup() the slot's own
         V3& x = g_v3[s];
         x.p = g_slot[t].p, x.p3 = g_v3[t].p3, x.code = g_v3[t].code, x.code_bytes = g_v3[t].code_bytes;
@@ -2968,17 +3033,23 @@ void job_step() {
   // W^X: the code part into the board's executable memory, the writable part (data + bss) into the data arena
   uint32_t bytes = (info.data_start + RMP_A64_ALIGN - 1) & ~(RMP_A64_ALIGN - 1);
   uint32_t dbytes = (info.image_size - info.data_start + info.bss_size + RMP_A64_ALIGN - 1) & ~(RMP_A64_ALIGN - 1);
+  if (!dbytes) dbytes = RMP_A64_ALIGN; // A valid distinct base even for an image with no writable bytes.
   uint8_t* img = ex->alloc(bytes);
+  if (img) {
+    g_arena_used += bytes;
+    g_v3[s].code = img; g_v3[s].code_bytes = bytes;
+  }
   uint8_t* dat = img ? data_alloc(dbytes) : nullptr;
-  if (!img || !dat) {   // the arenas are full of old images: start over once, else NO ROOM
-    if (g_arena_used) { g_full = true; g_job = -1; slot_set(s, RMP_SLOT_LOADING, nullptr, g_slot[s].pkg); return; }
+  g_v3[s].data = dat; g_v3[s].data_bytes = dat ? dbytes : 0;
+  if (!img || !dat) {
+    image_release(s); // Includes a code allocation whose paired data allocation failed.
+    if (!ex->release && g_arena_used && !(g_native_load_mask >> s & 1u)) { g_full = true; g_job = -1; slot_set(s, RMP_SLOT_LOADING, nullptr, g_slot[s].pkg); return; }
     char w[64];
     uint32_t cf = ex->total > g_arena_used ? ex->total - g_arena_used : 0, df = kDataArena > g_data_used ? kDataArena - g_data_used : 0;
     sniprintf(w, sizeof w, "needs %u B code + %u B data, %u + %u B free", (unsigned)bytes, (unsigned)dbytes, (unsigned)cf, (unsigned)df);
     job_end(s, RMP_SLOT_NO_ROOM, nullptr, g_slot[s].pkg, w);
     return;
   }
-  g_arena_used += bytes;
   if (ex->write_begin) ex->write_begin();
   st = rmp_place_a64(&info, img, (uintptr_t)img, dat, (uintptr_t)dat);
   ex->sync(img, bytes);
@@ -3047,6 +3118,7 @@ void answer(int s, int r) {
 }
 bool assign_id(int s, const char* id, uint32_t version) {
   if (id && id[0] && !rmp_id_ok(id)) return false;
+  g_native_load_mask &= ~(1u << s);
   rmp_resolve_set(&g_map, &g_notes, s, id, version, RMP_SRC_SAVED);   // the user's: saved (empty: explicitly)
   g_fresh = false;
   g_need |= 1u << s;
@@ -3072,7 +3144,7 @@ void held_run();
 #endif
 void on_assign(const uint8_t* d, int len) {
   rmp_assign a;
-  if (!rmp_parse_assign(d, len, &a) || a.slot < 1 || a.slot > kSlots) return;
+  if (!rmp_parse_assign(d, len, &a) || a.slot < 1 || a.slot > RMP_META_SLOTS) return;
   g_ans_t[a.slot - 1] = core::now_ms();
 #if CORE_MSAMP
   if (g_mr) {
@@ -3099,7 +3171,7 @@ void assign_run(const rmp_assign& a) {
 }
 void on_ask(const uint8_t* d, int len) {
   rmp_ask a;
-  if (!rmp_parse_ask(d, len, &a) || a.slot > kSlots) return;
+  if (!rmp_parse_ask(d, len, &a) || a.slot > RMP_META_SLOTS) return;
   if (a.what == RMP_ASK_INSTALLED || core::now_ms() - g_1d_ms >= 3000) g_1d_owed = true;
   int s = a.slot - 1;
   if (a.what == RMP_ASK_META && a.slot >= 1) {
@@ -3417,6 +3489,7 @@ void begin(const Exec* e, const char* d) {
 
 bool idle() {
   if (!ex) return false;
+  const bool native_did = native_poll(core::now_ms());
   bool did = true;
 #if CORE_MSAMP
   if (g_jdrop) jf_drain();
@@ -3431,13 +3504,16 @@ bool idle() {
     did = false;
   } else if (g_full) {
     for (int vi = 0; vi < core::kVoices; ++vi) voice_leave(vi);
+    for (int i = 0; i < kInst; ++i) inst_leave(i);
     for (int u = 0; u < kUfx; ++u) fx_stop(u);   // (core 2 out of the effects before their images go)
+    if (fx_any_dead()) return false; // A render may have stalled during the stop above.
     for (int s = 0; s < kAll; ++s) slot_set(s, entry_of(s).id[0] ? RMP_SLOT_LOADING : RMP_SLOT_EMPTY, nullptr, -1);
     jf_close();
     g_job = -1;
     ex->reset();
     g_arena_used = 0;
     g_data_used = 0;
+    g_data_pages.reset();
     g_pool_used = 0;   // (API 3: the arenas start over with the code)
     g_nfree = 0;
     g_jph = kJphImage;
@@ -3472,7 +3548,7 @@ bool idle() {
     g_pre_again = false;
     for (int s = 0; s < kSlots; ++s) pre_invalidate(s);
   }
-  for (int s = 0; s < kSlots; ++s) {   // answers: settled, or late
+  for (int s = 0; s < RMP_META_SLOTS; ++s) {   // answers: settled, or late
     if (g_ans[s] < 0) continue;
     if (settled(s)) { answer(s, result_of(s)); did = true; }
     else if (core::now_ms() - g_ans_t[s] > kAnsMs) { answer(s, RMP_RES_LOADING); did = true; }
@@ -3496,7 +3572,7 @@ bool idle() {
     g_pub_ms = core::now_ms();
     publish();
   }
-  return did;
+  return did || native_did;
 }
 
 void call_stall_limit(uint32_t us) { g_call_stall_us = us ? us : kCallStallUs; }
@@ -3552,6 +3628,189 @@ void rescan() {
 }
 
 bool tag_ok(int s, int tag) { return s >= 0 && s < kSlots && g_slot[s].st == RMP_SLOT_READY && tag == g_slot[s].fp; }
+int ready_slot(const char* id) {
+  if (!id || !*id) return -1;
+  for (int s = 0; s < kSlots; ++s) {
+    const int k = g_slot[s].pkg;
+    if (!g_full && !(g_need >> s & 1u) && g_job != s &&
+        g_slot[s].st == RMP_SLOT_READY && g_slot[s].p && !muted(s) &&
+        k >= 0 && k < g_npkg && !strcmp(g_pkg[k].id, id) &&
+        !strcmp(g_map.slot[s].id, id)) return s;
+  }
+  return -1;
+}
+int first_ready_slot() {
+  for(int s=0;s<kSlots;++s) if(ready_slot(g_map.slot[s].id)==s) return s;
+  return -1;
+}
+namespace {
+int native_pkg(const char* id, int& slot) {
+  slot = ready_slot(id);
+  if (slot < 0)
+    for (int s = 0; s < kSlots; ++s)
+      if (!strcmp(g_map.slot[s].id, id)) { slot = s; break; }
+  return slot >= 0 ? find_slot(slot) : find_pkg(id);
+}
+uint8_t native_state(int k, int slot) {
+  if (slot >= 0 && (g_full || (g_need >> slot & 1u) || g_job == slot)) return RMP_PST_LOADING;
+  if (slot >= 0) return uint8_t(rmp_proto_state(muted(slot) ? RMP_SLOT_MUTED : g_slot[slot].st));
+  // EMPTY means installed but not assigned to a loaded slot, not playable yet.
+  return k >= 0 ? RMP_PST_EMPTY : RMP_PST_MISSING;
+}
+}
+void native_descriptor(const char* id, NativeDescriptor& out) {
+  out = {};
+  int slot;
+  const int k = native_pkg(id, slot);
+  uint32_t version = 0, crc = 0, label_set = 0;
+  if (k >= 0) {
+    const Pkg& p = g_pkg[k];
+    out.desc = p.desc;
+    memcpy(out.desc.name, p.name, sizeof p.name);
+    if (slot >= 0) {
+      const int shown = lbl_shown(slot, p);
+      rmp_labels_apply(&p.lbl, shown, &out.desc);
+      label_set = uint32_t(shown + 1);
+    }
+    version = p.version; crc = p.crc;
+  } else rmp_desc_from_id(id, &out.desc);
+  out.state = native_state(k, slot);
+  out.flags = (out.desc.page2 ? RMP_FLAG_PARAMS : 0) | (slot >= 0 && g_pre_has[slot] ? RMP_FLAG_PRESETS : 0);
+  // Always describe the native bridge's sixteen positions, including unused ones.
+  out.desc.page2 = 1;
+  rmp_desc_pad_unused(&out.desc);
+  out.revision = rmp_meta_print(out.state, out.flags, id, version, &out.desc) ^ crc ^ label_set * 2654435761u;
+}
+void native_catalog(unsigned index, NativeCatalogEntry& out) {
+  out = {};
+  out.count = uint8_t(g_ninst);
+  uint32_t h = g_list_print;
+  // Availability can change without a package rescan. Include all slot identities
+  // and states so catalog pages cannot silently combine different assignments.
+  for (int s = 0; s < kSlots; ++s) {
+    for (unsigned i = 0; i < sizeof g_map.slot[s].id; ++i)
+      h = (h ^ uint8_t(g_map.slot[s].id[i])) * 16777619u;
+    h = (h ^ uint32_t(g_slot[s].st) ^ (muted(s) ? 128u : 0u)) * 16777619u;
+  }
+  out.revision = h;
+  if (index >= unsigned(g_ninst)) return;
+  const Pkg& p = g_pkg[g_inst[index]];
+  memcpy(out.id, p.id, sizeof out.id);
+  memcpy(out.name, p.name, sizeof out.name);
+  memcpy(out.short_name, p.desc.short_name, sizeof out.short_name);
+  int slot;
+  const int k = native_pkg(p.id, slot);
+  out.state = native_state(k, slot);
+}
+int native_names(const char* id, unsigned p1, char names[][8]) {
+  int slot;
+  const int k = native_pkg(id, slot);
+  if (k < 0 || p1 < 1 || p1 > 16) return 0;
+  const Pkg& p = g_pkg[k];
+  const int q = rmp_desc_find(&p.desc, int(p1));
+  if (q < 0) return 0;
+  const int n = rmp_labels_enum(&p.lbl, slot >= 0 ? lbl_shown(slot, p) : -1, int(p1), names);
+  if (n >= 0) return n;
+#if UM_NAMES_CACHE
+  if (p.nnames) {
+    NamesRd r{&p};
+    return rmp_manifest_enum(&p.desc, q, names_rd, &r, names);
+  }
+#endif
+  // No synchronous filesystem fallback on the control core.
+  return p.desc.knob[q].enum_count ? -1 : 0;
+}
+uint8_t native_load(const char* id) {
+  if (!id || !rmp_id_ok(id)) return RMP_PST_BAD;
+  if (ready_slot(id) >= 0) return RMP_PST_READY;
+  // Map/scan changes publish their own assignments; never race them with a UI request.
+#if CORE_MSAMP
+  if (g_mr) return RMP_PST_LOADING;
+#endif
+  if (!ex) return RMP_PST_BAD;
+  if (g_full || g_scan) return RMP_PST_LOADING;
+  for (int s = 0; s < kSlots; ++s) {
+    if (strcmp(g_map.slot[s].id, id)) continue;
+    if ((g_need >> s & 1u) || g_job == s) return RMP_PST_LOADING;
+    const int state = rmp_proto_state(muted(s) ? RMP_SLOT_MUTED : g_slot[s].st);
+    return state == RMP_PST_EMPTY ? RMP_PST_BAD : uint8_t(state);
+  }
+  const int k = find_pkg(id);
+  if (k < 0) return RMP_PST_MISSING;
+  const Pkg& p = g_pkg[k];
+  if (!p.ok || (p.hflags & RMP_HF_EFFECT)) return RMP_PST_BAD;
+  if (g_job >= 0 || g_need) return RMP_PST_LOADING;
+  // These are plugin-state owners, not sounding/live flags. A muted or stopped
+  // part still reserves its engine; replacing an unused cached assignment must
+  // not make that part unavailable when it starts again. Prefer empty entries
+  // before evicting cached ones. The normal asynchronous loader retires only
+  // this slot, and native loads remain forbidden from compacting all images.
+  for (int pass = 0; pass < 2; ++pass) {
+    for (int s = 0; s < kSlots; ++s) {
+      const bool empty = !g_map.slot[s].id[0] && g_slot[s].st == RMP_SLOT_EMPTY;
+      if (empty != (pass == 0)) continue;
+      bool used = false;
+      for (int vi = 0; vi < core::kVoices; ++vi) if (g_cur[vi] == s) used = true;
+      for (int i = 0; i < kInst; ++i) if (g_icur[i] == s) used = true;
+      for (int vi = 0; vi < core::kVoices; ++vi)
+        if (g_native_ids[vi][0] && !strcmp(g_native_ids[vi], g_map.slot[s].id)) used = true;
+      if (used) continue;
+      if (!assign_id(s, p.id, p.version)) return RMP_PST_BAD;
+      g_native_load_mask |= 1u << s;
+      return RMP_PST_LOADING;
+    }
+  }
+  return RMP_PST_NO_ROOM;
+}
+bool native_request(unsigned part, const char* id) {
+  if (part >= core::kVoices || !id || !rmp_id_ok(id)) return false;
+  const bool changed = strcmp(g_native_ids[part],id) != 0;
+  if (changed) copy(g_native_ids[part],id,sizeof g_native_ids[part]);
+  const uint32_t bit = 1u << part;
+  if (changed || (!(g_native_pending & bit) && ready_slot(id) < 0)) {
+    g_native_pending |= bit; g_native_kick = true;
+  }
+  return true;
+}
+void native_forget(unsigned part) {
+  if (part >= core::kVoices) return;
+  g_native_ids[part][0] = 0; g_native_pending &= ~(1u << part);
+}
+bool native_poll(uint32_t now) {
+  if (!g_native_pending || (!g_native_kick && (int32_t)(now-g_native_due)<0)) return false;
+  g_native_kick = false; g_native_due = now + 25;
+  for (unsigned n=0;n<core::kVoices;++n) {
+    const unsigned part=(g_native_cursor+n)%core::kVoices;
+    if (!(g_native_pending >> part & 1u)) continue;
+    g_native_cursor=(part+1)%core::kVoices;
+    // Missing/contended engines stay pending: a rescan or another part changing
+    // assignment can make them available later. native_load does not retry a
+    // failed assigned package or compact unrelated live images.
+    if (native_load(g_native_ids[part]) == RMP_PST_READY) g_native_pending &= ~(1u << part);
+    return true;
+  }
+  return false;
+}
+bool native_note_on(int vi, float note, float velocity) {
+  if (vi < 0 || vi >= core::kVoices || !(note >= 0 && note < 128) ||
+      !(velocity >= 0 && velocity <= 1)) return false;
+  const int s = core::v[vi].user;
+  if (s < 0 || s >= kSlots || g_slot[s].st != RMP_SLOT_READY || !g_slot[s].p || muted(s)) return false;
+  on_report_precise(vi, s, s, note, velocity, 0);
+  if (!core::v[vi].live) return false;
+  core::voice_wake(vi);
+  return true;
+}
+bool slot_defaults(int s, uint8_t values[16]) {
+  if (!values || s < 0 || s >= kSlots || g_slot[s].st != RMP_SLOT_READY) return false;
+  const int k = g_slot[s].pkg;
+  if (k < 0 || k >= g_npkg) return false;
+  const rmp_desc& d = g_pkg[k].desc;
+  memset(values, 0, 16);
+  for (int i = 0; i < d.nknobs; ++i)
+    if (d.knob[i].p >= 1 && d.knob[i].p <= 16) values[d.knob[i].p - 1] = d.knob[i].def;
+  return true;
+}
 
 // ---- E0: instances (core/inst.h)
 static_assert(kInst == core::inst::kTotal, "um's instance states: one per core::inst instance");
@@ -3718,14 +3977,14 @@ bool command(const char* c, char* out, int cap) {
   }
   if (strncmp(c, "um=reload:", 10) == 0) {   // API 3: load the slot again (a muted slot back, its states and arena fresh)
     int s = c[10] == 'f' ? kSlots + (c[11] - '1') : c[10] - '1';   // um=reload:f<1..4>: UFX<n>
-    if (s < 0 || s >= kAll || (s >= kSlots && c[12]) || (s < kSlots && c[11])) { sniprintf(out, cap, "usage: um=reload:<1..5> or f<1..4>"); return true; }
+    if (s < 0 || s >= kAll || (s >= kSlots && c[12]) || (s < kSlots && c[11])) { sniprintf(out, cap, "usage: um=reload:<1..%d> or f<1..4>", kSlots); return true; }
     g_need |= 1u << s;
     sniprintf(out, cap, "%s%d: loading again%s", s < kSlots ? "U" : "UFX", s < kSlots ? s + 1 : s - kSlots + 1, muted(s) ? " (it was muted)" : "");
     return true;
   }
   if (strncmp(c, "um=save:", 8) == 0) {   // a generic preset of what the slot's voice plays now
     int s = c[8] - '1';
-    if (s < 0 || s >= kSlots || c[9] != ':') { sniprintf(out, cap, "usage: um=save:<1..5>:<name>"); return true; }
+    if (s < 0 || s >= kSlots || c[9] != ':') { sniprintf(out, cap, "usage: um=save:<1..%d>:<name>", kSlots); return true; }
     pre_save(s, c + 10, out, cap);
     return true;
   }
@@ -3785,7 +4044,7 @@ bool command(const char* c, char* out, int cap) {
     bool clear = c[3] == 'c';
     const char* p = c + (clear ? 9 : 10);
     int s = *p - '1';
-    if (s < 0 || s >= kSlots || (!clear && p[1] != ':')) { sniprintf(out, cap, "usage: um=assign:<1..5>:<id> | um=clear:<1..5>"); return true; }
+    if (s < 0 || s >= kSlots || (!clear && p[1] != ':')) { sniprintf(out, cap, "usage: um=assign:<1..%d>:<id> | um=clear:<1..%d>", kSlots, kSlots); return true; }
     if (clear) {
       assign_id(s, "", 0);
       sniprintf(out, cap, "U%d cleared", s + 1);
@@ -3827,6 +4086,7 @@ bool ui_view(UiView* out) {
 void publish_now() { g_pub = false; g_pub_ms = core::now_ms(); publish(); }
 const char* dir() { return g_dir; }
 uint32_t code_epoch() { return __atomic_load_n(&g_epoch, __ATOMIC_ACQUIRE); }
+uint32_t slot_epoch(int slot) { return slot >= 0 && slot < kAll ? g_slot_epoch[slot] : 0; }
 SlotView slot_view(int s) {
   if (s >= kSlots && s < kAll) {   // UFX1..UFX4: kSlots + u
     const V3& x = g_v3[s];
