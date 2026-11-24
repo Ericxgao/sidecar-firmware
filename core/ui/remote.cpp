@@ -1347,6 +1347,10 @@ CORE_COLD void splash_tick(uint32_t ms) {
     send_short(kSplash, &b, 1);
     s.splash = false;
     s.sent_valid = false;   // the Rytm's shadow holds the splash; the page sends its whole frame on opening anyway
+    // 3A 0 0: the shadow (CONNECTED) stays hidden until our next commit. Not when the SRC view's page follows: its whole
+    // frame replaces the shadow, and the Rytm acts on a 3A at its next 50 ms UI tick (sv.base = commits), which would
+    // also hide that frame if it came in the same tick
+    if (!s.open && !(s.src_track >= 0 && track_page(s.src_track))) remote_request(false);
     return;
   }
   if (!first && ms - s.last_draw < (t < kSlideMs + kSlideStepMs ? kSlideStepMs : kSplashStepMs)) return;
@@ -1480,17 +1484,22 @@ volatile uint16_t disp_owned = 0;   // bit p: the platform's touchscreen shows p
 // has claimed them with 4A 7E 1, after every hello (the Rytm clears the claim at each hello and when its USB port goes
 // down); without the claim they stay stock's. An older Rytm counts a 4A 7E as a bad message: only with the bit.
 static bool g_fill_keys_off = false, g_fill_claimed = false;
+static bool g_nohello_told = false;   // the log line of the no-hello claim, once per link
+static uint32_t g_claim_ms = 0;   // the last claim's tick time
 static volatile bool g_going_down = false;
 CORE_COLD void fill_claim() {   // (L7: only a build with the FILL page claims the Rytm's UP + RIGHT)
 #if CORE_POLY
-  if (!(s.caps2 & kCaps2Arrows)) {   // an older mod: the Rytm's claim is gone at the hello, and 4A 7E 0 would be a bad message
+  // (no hello seen yet is unknown, not an older mod: the Rytm says hello only at its USB port-up, so a host that started
+  // after it never hears one and would never claim; a 0.4.x mod counts the 4A 7E as one bad message. A box (A4 /
+  // Digitakt) never gets the guess: only its own hello's caps2 claims)
+  if ((s.stats.hellos > 0 || device::foreign()) && !(s.caps2 & kCaps2Arrows)) {   // an older mod: the Rytm's claim is gone at the hello, and 4A 7E 0 would be a bad message
     g_fill_claimed = false;
     return;
   }
   if (g_fill_keys_off) return;
   const uint8_t m[9] = {0xF0, 0x7D, 0x52, 0x54, 0x4A, 1, 0x7E, 1, 0xF7};
   to_rytm(m, 9);
-  g_fill_claimed = true;
+  g_fill_claimed = true, g_claim_ms = s.now_ms;
 #endif
 }
 CORE_COLD void fill_unclaim() {
@@ -1651,6 +1660,17 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
   const uint8_t* b = d + 6;
   int n = len - 7;
   if (d[4] == kSrcView || d[4] == kSrcVals || d[4] == kSrcDiag) src_capable = true;
+#if CORE_POLY
+  // 2026-11-23: Rytm traffic and no hello (the host started after the Rytm's port-up): claim UP + LEFT / RIGHT once; the
+  // 2 s claim (remote_tick) goes on from there, and the first hello, if one ever comes, decides as before. Never for a box.
+  if (s.stats.hellos == 0 && !g_fill_claimed && !g_fill_keys_off && !g_going_down && d[4] != kHello && !device::foreign()) {
+    fill_claim();
+    if (g_fill_claimed && !g_nohello_told) {
+      g_nohello_told = true;   // (once per link: a hello clears it)
+      core::log("rui: Rytm traffic before any hello: claimed UP+RIGHT, caps unknown");
+    }
+  }
+#endif
 #if CORE_POLY && CORE_MSAMP
   // an UP combo the mod ate (UP + T1..T14 49 1 n, UP + YES / LFO / FX / AMP / TRIG 30, UP + SRC 29 / the bank list, the map
   // 49 1 5): UP's release that follows is no tap (CHOP's ALL toggle)
@@ -2074,12 +2094,14 @@ CORE_COLD void remote_sysex(const uint8_t* d, int len) {
 #endif
       return;
     case kHello: {   // 1023: <uptime >> 7> <uptime & 0x7F> <caps>: the splash when the Rytm was up before the link
+      g_nohello_told = false;
       s.presets_told = false;
       s.mlist = false, page_two_cancel();   // rc5: a new link: no list choice owed
       s.covered = false;   // (the Rytm's 2B says again)
       if (n < 3) break;
       s.stats.hellos++;
       int up = b[0] << 7 | b[1];
+      if (s.stats.hellos > 1) voice_reports_forget();   // the Rytm restarted: its 33 re-seeds the engines (not the Pi's own boot)
       // A new link (a replug, the Rytm's or our restart): whatever the Rytm showed before is gone - its page left by its
       // 1 s timeout, its SRC view says 29 t 1 again after this hello if it is on. Stale state here (the page open, a
       // view's track, a splash running when the cable went) blocked the splash and the view until a restart.
@@ -2159,6 +2181,8 @@ static CORE_COLD void key_repeat_tick(uint32_t ms) {
 
 CORE_COLD void remote_tick(uint32_t ms) {
   if (g_going_down && !g_fill_keys_off) g_fill_keys_off = true, fill_unclaim();   // (a planned reboot: remote.h)
+  // the claim again every ~2 s while linked (the Rytm drops it at each USB port drop; a 4A 7E 1 only sets its flag)
+  if (g_fill_claimed && !g_going_down && (int32_t)(ms - g_claim_ms) >= 2000) fill_claim(), g_claim_ms = ms;
   if (!s.presets_told && s.src_track >= 0) {
     int m = track_machine(s.src_track);
     if (m == core::kJuno || m == core::kFm) {
@@ -2660,6 +2684,8 @@ CORE_COLD bool remote_key_repeating() { return s.rep_code >= 0; }
 
 CORE_COLD void remote_reset() {
   s = State();
+  g_fill_claimed = g_fill_keys_off = g_nohello_told = false;   // (tests: the claim statics too)
+  g_going_down = false;
   for (auto& w : g_vp) w = VParam();
   for (int t = 0; t < 12; ++t) g_vp_failed[t] = 0, g_vp_kind[t] = 0;
   detent_reset();
