@@ -5,9 +5,11 @@ independent parts use a shared manifest-driven adapter, with sixteen fractional
 controls, native machine names/pages, session ownership and eight mono returns.
 Compatible Pi plugins can appear without adding a per-engine DN2 definition.
 
-The candidate starts at the Sidecar 0.5.1 development base. Updating to a newer
-upstream revision is a separate integration task. This is not a firmware release
-or a claim that this extracted tree has been booted on hardware.
+The merge proposal is on `propose/dn2-native`, based on current `origin/dev`
+(0.5.1.2). The original 0.5.1 extraction remains on `review/dn2-bridge`.
+The update preserves upstream's pool-code helpers, voice report reset on
+reconnect and USB timing diagnostics. This is not a firmware release or a claim
+that this extracted tree has been booted on hardware.
 
 ## Review boundaries
 
@@ -78,12 +80,39 @@ missing/reinstalled engines, reordered slots, reconnect and cancelled loading.
 These results use synthetic providers and owner-supplied firmware inputs for
 the DN2 side; they do not execute external drum DSP or qualify hardware timing.
 
-The paired DN2 contribution is now prepared on exact dn2mk2 v0.72 / Elektron
-OS 1.11, on `review/dn2-bridge-v072`. Its public SC Snare metadata check and
-saved eight-part packet exchange pass against this unchanged Pi runtime.
+The paired DN2 contribution is prepared on current dn2mk2 `main` (v0.72 plus
+documentation, Elektron OS 1.11), on `propose/sidecar-native`. The verified v0.72
+executable sources are unchanged. Both earlier review branches are preserved.
 See the paired `docs/sidecar-review.md` for current image/routing evidence and
 `docs/sidecar-proposal.md` for the unsent maintainer handoff. The two endpoints
 share a protocol; their product release numbers need not match.
+
+The normal `tools/run_portable_tests.sh` now includes the DN2 portable codec,
+session, metadata and control checks with ASan/UBSan, plus the five/eight-slot
+allocator checks. The existing Pi suite already exercises the real USB driver
+through Circle shims. These checks need no DN2 firmware or companion checkout.
+See [the draft PR body](PR.md) for submission scope and outstanding acceptance.
+
+Current merge-proposal evidence (2026-11-24): the native portable phase completed
+with `ALL PI PORTABLE TESTS PASS` on Ubuntu 24.04/WSL, GCC 13 and Node 22.
+Thirteen Mac-library/Circle-dependent targets were explicitly skipped. The web
+phase initially hit six CRLF-sensitive source-parser failures in the Windows
+checkout. With canonical LF inputs, 101 of 102 passed; the remaining pairing
+case failed its lockout assertion twice, then passed in isolation on both an
+unmodified `origin/dev` export and the candidate. Its intermittent behavior is
+recorded, not fixed or suppressed by this proposal. There was no final all-green
+whole-run invocation; these are phased results.
+
+The added DN2 phase passed separately with ASan/UBSan, and both allocator maps
+passed 20,000 swaps. The Windows real USB driver/mirror checks, fourteen frozen
+wire events and saved eight-part packet exchange also passed. GCC warnings in
+unchanged upstream sources are reported using the normal portable runner's
+policy, rather than promoted to errors by the new helper. Runtime assertions
+and sanitizer failures still fail the check.
+
+Use a Linux checkout with LF line endings for the Linux test command. The
+source-parsing web tests assume canonical newlines. The shareable
+[validation receipt](validation.json) lists commands, skips and unrun checks.
 
 Use upstream's Pi build instructions and dependency pins. The Pi host sets
 `SIDECAR_EIGHT_ENGINES`; the display driver is not required. `dn2=1` enables the

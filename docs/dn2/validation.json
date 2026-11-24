@@ -1,0 +1,60 @@
+{
+  "scope": "Merge proposal; phased offline evidence, no device installation or complete CI pass",
+  "base": "28abf096435cdad21900810d887ec12361b7b61f",
+  "code_revision": "5b9405dd865490b863ef1d6fb7ced536b0945b77",
+  "platform": "Ubuntu 24.04 / WSL / GCC 13 / Node 22.23.5; Windows LLVM-MinGW for driver interoperability",
+  "native_portable": "passed",
+  "dependency_skips": [
+    "test_bundleweb",
+    "test_poolweb",
+    "test_presetweb",
+    "test_morph_pi",
+    "test_xypad_pi",
+    "test_keys_ui",
+    "test_content",
+    "test_insfx_pi",
+    "test_voice_gate",
+    "test_stor_fatfs",
+    "test_stor_fatfs_exfat",
+    "test_stor_fatfs_lfn3",
+    "test_gadget_ep0"
+  ],
+  "web": {
+    "full_phase_passed": 101,
+    "full_phase_failed": 1,
+    "total": 102,
+    "isolated_retry_passed": 1,
+    "upstream_isolated_baseline_passed": 1,
+    "case": "page_pair.test.mjs: peer lockout",
+    "qualification": "Intermittent lockout assertion; unchanged test/mock. Initial six source-parser failures corrected by canonical LF checkout representation. No final whole-script green run."
+  },
+  "dn2_sanitized": "passed (ASan/UBSan)",
+  "image_arena": {
+    "slots": [
+      5,
+      8
+    ],
+    "swaps_each": 20000,
+    "passed": true
+  },
+  "windows_usb_driver_and_mirror": "passed",
+  "frozen_wire_events": 14,
+  "saved_eight_part_receiver": "passed",
+  "commands": [
+    "CXX=g++ CC=gcc bash tools/run_portable_tests.sh",
+    "node --test web/*.test.mjs pi/engine/tests/*.test.mjs",
+    "node --test --test-name-pattern=someone pi/engine/tests/page_pair.test.mjs",
+    "python3 tools/dn2/check_dn2.py --sanitize",
+    "python3 tools/dn2/check_image_arena.py",
+    "python tools/dn2/check_dn2.py --usb",
+    "python tools/dn2/check_bridge_contract.py --dn2 PATH --coldfire --m68k-bin PATH",
+    "python tools/dn2/check_dn2.py --recovery-only PATH"
+  ],
+  "not_run": [
+    "GitHub required CI",
+    "macOS core suite",
+    "clean Pi kernel build",
+    "live Rytm regression and boot order",
+    "new candidate hardware/audio timing qualification"
+  ]
+}

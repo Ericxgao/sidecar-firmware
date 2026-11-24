@@ -47,4 +47,8 @@ run ob_block_test   -I"$R/teensy/libraries/RytmHost" "$R/teensy/libraries/RytmHo
 "$T/test_rmp_api"; echo "test_rmp_api: PASS"
 
 (cd "$R" && node --test web/*.test.mjs pi/engine/tests/*.test.mjs)
+
+# DN2 host and five/eight-slot allocator: original fixtures, no companion checkout,
+# vendor firmware, cross compiler or device needed. Real USB driver cases ran above.
+(cd "$R" && python3 tools/dn2/check_dn2.py --sanitize && python3 tools/dn2/check_image_arena.py)
 echo "ALL PORTABLE TESTS PASS"

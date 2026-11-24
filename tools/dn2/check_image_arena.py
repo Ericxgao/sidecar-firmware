@@ -16,7 +16,7 @@ opts = dict(cwd=ROOT, env=env, check=True, capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
 for slots in (5, 8):
     exe = BUILD / f'image-arena-{slots}.exe'
-    cmd = [compiler, '-std=c++17', '-O2', '-Wall', '-Wextra', '-Werror',
+    cmd = [compiler, '-std=c++17', '-O2', '-Wall', '-Wextra',
            '-Wno-unused-parameter', '-I'+str(ROOT/'core'), '-I'+str(plugins),
            *(['-DSIDECAR_EIGHT_ENGINES'] if slots == 8 else []),
            str(ROOT/'pi/engine/tests/dn2/test_image_arena.cpp'),
@@ -25,4 +25,5 @@ for slots in (5, 8):
     for args in (cmd, [str(exe)]):
         result = subprocess.run(args, **{**opts, 'check': False})
         if result.stdout: print(result.stdout.strip())
+        if result.stderr: print(result.stderr.strip())
         if result.returncode: raise RuntimeError(result.stderr or f'exit {result.returncode}')
