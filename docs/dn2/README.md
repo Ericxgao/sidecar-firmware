@@ -52,6 +52,19 @@ These RMP files contain **metadata and a null callback table only**. They are te
 containers, not playable plugins; never install them. An actual plugin acceptance
 demo can use an existing public Sidecar plugin such as SC Snare.
 
+Build the unmodified, playable public demo with an existing AArch64 bare-metal
+toolchain (no downloads or installation):
+
+```
+python tools/dn2/build_public_demo.py --a64-bin PATH_TO_TOOLCHAIN_BIN
+```
+
+The package and source/compiler receipt are written under
+`build/dn2/public-demo/`. Set `SIDECAR_DEMO_PACKAGE` to the absolute path of
+`sc_snare.a64.rmp` when running the paired DN2 metadata test. This tests real
+package metadata, not audio rendering or live playback. Its ten controls also
+exercise hidden unused SYN cells. The demo build passed with GNU Arm 13.3.rel1.
+
 Checks write receipts under ignored `build/dn2/`. The public contract is
 [event/session/storage](PROTOCOL.md) and [metadata](UI-PROTOCOL.md).
 
@@ -64,6 +77,13 @@ from the paired DN2 candidate also passed the Pi session/receiver check, includi
 missing/reinstalled engines, reordered slots, reconnect and cancelled loading.
 These results use synthetic providers and owner-supplied firmware inputs for
 the DN2 side; they do not execute external drum DSP or qualify hardware timing.
+
+The paired DN2 contribution is now prepared on exact dn2mk2 v0.72 / Elektron
+OS 1.11, on `review/dn2-bridge-v072`. Its public SC Snare metadata check and
+saved eight-part packet exchange pass against this unchanged Pi runtime.
+See the paired `docs/sidecar-review.md` for current image/routing evidence and
+`docs/sidecar-proposal.md` for the unsent maintainer handoff. The two endpoints
+share a protocol; their product release numbers need not match.
 
 Use upstream's Pi build instructions and dependency pins. The Pi host sets
 `SIDECAR_EIGHT_ENGINES`; the display driver is not required. `dn2=1` enables the
