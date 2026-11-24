@@ -57,6 +57,14 @@ Checks write receipts under ignored `build/dn2/`. The public contract is
 
 ## Build and hardware limits
 
+Recorded extraction check (2026-11-24): all host/USB checks above passed;
+five/eight-slot allocator fixtures each completed 20,000 swaps; fourteen frozen
+events matched host and compiled ColdFire encoders. Saved eight-part packets
+from the paired DN2 candidate also passed the Pi session/receiver check, including
+missing/reinstalled engines, reordered slots, reconnect and cancelled loading.
+These results use synthetic providers and owner-supplied firmware inputs for
+the DN2 side; they do not execute external drum DSP or qualify hardware timing.
+
 Use upstream's Pi build instructions and dependency pins. The Pi host sets
 `SIDECAR_EIGHT_ENGINES`; the display driver is not required. `dn2=1` enables the
 profile, with eight-part native session startup by default; `dn2auto=0` retains
