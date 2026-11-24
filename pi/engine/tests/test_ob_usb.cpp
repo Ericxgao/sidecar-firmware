@@ -9,6 +9,9 @@
 #include "ob_usb.h"
 #include "ob_follow.h"
 #include "shared.h"
+#include "bridge.h"
+#include "device/dn2_audio.h"
+#include "device/dn2.h"
 #include <circle/timer.h>
 #include <circle/usb/usbstandardhub.h>
 
@@ -30,11 +33,13 @@ void CLogger::Write(const char*, int, const char* f, ...) {
 #include "device/a4.h"
 namespace core { namespace device {
 static bool g_a4_chosen = false;      // its hello chose it (device.cpp: audio_by_hello)
+static bool g_dn2_chosen = false;
 const Profile& active() {             // (only ob_follow.cpp asks)
   static Profile none;
-  return g_a4_chosen ? kA4 : none;
+  return g_dn2_chosen ? kDn2 : g_a4_chosen ? kA4 : none;
 }
 const Profile* by_usb(uint16_t vid, uint16_t pid) {   // device.cpp's list, without the engine it links
+  if (g_dn2_chosen) return vid == kDn2Vid && pid == kDn2Pid ? &kDn2 : nullptr;
   static Profile rytm;
   rytm.audio = &out::kRytmMk2;
   if (vid == 0x1935 && pid == 0x0b48) return &rytm;
@@ -229,6 +234,226 @@ int main() {
     CHECK(g_Output.Underflows() == 0);
   }
   CHECK(&core::out::device() == &core::out::kRytmMk2);   // the box gone: the Rytm's table again
+
+  { // DN2 blocks ordinary output; only the typed session queue may send controls.
+    core::device::g_dn2_chosen = true;
+    CObUsbTransport transport;
+    CUSBMIDIDevice midi;
+    transport.SetMIDI(&midi);
+    transport.SetSend(TRUE); // even a conflicting tohost=1 must not send
+    g_KeysToRytm.push(0x00643c90u);
+    g_ToHost.q.push_back({0xf0, 0x7d, 0x52, 0x54, 0x35, 0xf7});
+    transport.Poll();
+    CHECK(midi.sent == 0 && g_ToHost.q.empty() && g_KeysToRytm.size() == 0);
+    CHECK(g_nDn2Transport & 1u);
+    uint32_t epoch = g_nDn2Transport >> 1;
+    using dn2_native::LinkCommand;
+    using dn2_native::LinkControl;
+    LinkControl hello{LinkCommand::Hello, 1234, 9};
+    uint8_t packet[50]; CHECK(dn2_native::encode_link(hello, packet, sizeof packet));
+    g_ToHost.q.push_back({packet, packet + 50}); // even a valid control in the ordinary queue is blocked
+    CHECK(g_Dn2LinkOut.push({hello, epoch - 1}));
+    CHECK(g_Dn2LinkOut.push({{LinkCommand::Ack, 1234, 9}, epoch}));
+    CHECK(g_Dn2LinkOut.push({{LinkCommand::Hello, 0, 9}, epoch}));
+    CHECK(g_Dn2LinkOut.push({hello, epoch}));
+    transport.SetSend(FALSE); // session channel is separate from tohost's engine output
+    transport.Poll();
+    CHECK(midi.sent == 1 && midi.packets.back().size() == 68 && g_ToHost.q.empty());
+    std::vector<uint8_t> actual;
+    const auto& wire = midi.packets.back();
+    for (size_t i = 0; i < wire.size(); i += 4) {
+      unsigned count = wire[i] == 4 ? 3 : wire[i] - 4;
+      CHECK(count == 2 || count == 3);
+      actual.insert(actual.end(), wire.begin() + i + 1, wire.begin() + i + 1 + count);
+    }
+    CHECK(actual == std::vector<uint8_t>(packet, packet + 50));
+    transport.SetMIDI(nullptr);
+    CHECK(!(g_nDn2Transport & 1u));
+    CHECK(g_Dn2LinkOut.push({hello, epoch})); transport.Poll(); CHECK(g_Dn2LinkOut.size() == 0);
+    transport.SetMIDI(&midi); CHECK((g_nDn2Transport >> 1) != epoch);
+    CHECK(g_Dn2LinkOut.push({hello, epoch})); transport.Poll(); CHECK(midi.sent == 1);
+    epoch = g_nDn2Transport >> 1;
+    CHECK(g_Dn2LinkOut.push({hello, epoch})); transport.Poll(); CHECK(midi.sent == 2);
+    { // UI replies share the bounded transport, but cannot bypass session/epoch checks.
+      dn2_native::UiAsk ask;
+      ask.token = 1234; ask.serial = 17; ask.op = dn2_native::UiCatalog;
+      dn2_native::UiReply ui;
+      ui.epoch = epoch; ui.bytes = 71;
+      dn2_native::ui_reply_head(ask, 0xfedcba98, ui);
+      ui.packet[70] = 0xf7;
+      g_nDn2UiToken = ask.token;
+      auto stale = ui; stale.epoch--;
+      CHECK(g_Dn2UiOut.push(stale));
+      stale = ui; stale.packet[9] ^= 1;
+      CHECK(g_Dn2UiOut.push(stale));
+      transport.Poll(); CHECK(midi.sent == 2 && g_Dn2UiOut.size() == 0);
+      CHECK(g_Dn2UiOut.push(ui)); CHECK(g_Dn2LinkOut.push({hello, epoch}));
+      transport.Poll(); CHECK(midi.sent == 4);
+      CHECK(midi.packets[midi.packets.size() - 2].size() == 68); // lease first
+      CHECK(midi.packets.back().size() == 96);
+      std::vector<uint8_t> reply;
+      const auto& wire = midi.packets.back();
+      for (size_t i = 0; i < wire.size(); i += 4) {
+        unsigned count = wire[i] == 4 ? 3 : wire[i] - 4;
+        CHECK(count >= 1 && count <= 3);
+        reply.insert(reply.end(), wire.begin() + i + 1, wire.begin() + i + 1 + count);
+      }
+      CHECK(reply == std::vector<uint8_t>(ui.packet, ui.packet + ui.bytes));
+      CHECK(g_Dn2UiOut.push(ui)); g_nDn2UiToken = 0;
+      transport.Poll(); CHECK(midi.sent == 4 && g_Dn2UiOut.size() == 0);
+      CHECK(g_Dn2UiOut.push(ui)); transport.SetMIDI(nullptr);
+      CHECK(g_Dn2UiOut.size() == 0);
+      transport.SetMIDI(&midi); transport.Poll(); epoch = g_nDn2Transport >> 1;
+    }
+    midi.fail = 1; CHECK(g_Dn2LinkOut.push({hello, epoch})); transport.Poll();
+    CHECK((g_nDn2Transport >> 1) != epoch); // failure remains observable even if endpoint reset recovered immediately
+    transport.SetMIDI(nullptr);
+    core::device::g_dn2_chosen = false;
+  }
+
+  // DN2 wire format through the actual USB callbacks, output mixer and input
+  // consumers. Synthetic descriptors/packets, not hardware evidence.
+  uint8_t dn2[sizeof g_rytm];
+  memcpy(dn2, g_rytm, sizeof dn2);
+  dn2[kInAlt3Mps] = 0xf4, dn2[kInAlt3Mps + 1] = 3; // 1012
+  dn2[kOutAlt3Mps] = 0, dn2[kOutAlt3Mps + 1] = 1; // 256
+  core::device::g_dn2_chosen = true;
+  {
+    Bus b(g_rytm, core::device::kDn2Pid);
+    CHECK(b.ob && !b.ob->Configure()); // wrong endpoint sizes refused
+    CHECK(b.host.in.empty() && b.host.ctl.empty());
+  }
+  for (unsigned blocks : {1u, 8u}) {
+    auto* options = CKernelOptions::Get();
+    options->num["obblocks"] = blocks;
+    options->str["obctr"] = "in";
+    Bus b(dn2, core::device::kDn2Pid);
+    CHECK(b.ob && b.ob->Configure());
+    same_sequence(b.host);
+    CHECK(b.host.in.size() == 8 && b.host.in.front()->len == blocks * 1012);
+    CHECK(core::out::device().wire == core::out::kObDn2);
+    for (int v = 0; v < 8; ++v) CHECK(core::out::control.route[v] == core::out::kPost);
+    int16_t fr[128][8] = {};
+    for (auto& f : fr) f[0] = -8000; // one Pi voice, test negative packing too
+    CHECK(g_Output.Push(fr, 128) == 128);
+    auto deliver = [&](bool valid, unsigned short_by) {
+      CUSBRequest* u = b.host.in.front();
+      b.host.in.pop_front();
+      CHECK(u->len == blocks * 1012);
+      memset(u->buf, 0, u->len);
+      for (unsigned k = 0; k < blocks; ++k) {
+        auto* p = u->buf + k * 1012;
+        const uint16_t counter = uint16_t(65530 + k * 7);
+        p[0] = valid ? 7 : 6;
+        p[2] = uint8_t(counter >> 8), p[3] = uint8_t(counter);
+        unsigned pos = 32;
+        for (int f = 0; f < 7; ++f)
+          for (int c = 0; c < 42; ++c) {
+            if (c < 14) p[pos++] = 0x55; // ignored padding
+            // Independent 24-bit fixture, all channels distinct, both signs.
+            int32_t sample = (f + 1) * 1000 + c * 2;
+            if (c & 1) sample = -sample;
+            if (c == 30 || c == 31) sample += 700; // track 15 differs from every other downmix
+            uint32_t bits = uint32_t(sample);
+            p[pos++] = uint8_t(bits >> 16);
+            p[pos++] = uint8_t(bits >> 8);
+            p[pos++] = uint8_t(bits);
+          }
+        CHECK(pos == 1012);
+      }
+      u->SetStatus(1), u->SetResultLen(u->len - short_by);
+      u->fn(u, u->param, u->ctx);
+    };
+    bridge::test_tap_on = true;
+    bridge::test_tap_blocks = 0;
+    deliver(false, 0);
+    CHECK(b.host.out.empty() && bridge::test_tap_blocks == 0);
+    deliver(true, 0);
+    CHECK(bridge::test_tap_blocks == blocks);
+    for (int f = 0; f < 7; ++f) {
+      CHECK(bridge::test_tap[f][0] == (f + 1) * 1000 * 256);
+      CHECK(bridge::test_tap[f][1] == -((f + 1) * 1000 + 2) * 256);
+      for (int c = 2; c < 10; ++c) CHECK(bridge::test_tap[f][c] == -256);
+      CHECK(bridge::test_tap[f][10] == ((f + 1) * 1000 + 80) * 256);
+      CHECK(bridge::test_tap[f][11] == -((f + 1) * 1000 + 82) * 256);
+    }
+    CHECK(b.host.out.size() == 1 && b.host.out.front()->len == blocks * 256);
+    const auto* out = b.host.out.front()->buf;
+    bool audible = false;
+    for (unsigned k = 0; k < blocks; ++k) {
+      const auto* p = out + k * 256;
+      CHECK(p[0] == 7 && p[1] == 255);
+      CHECK(ob::block_counter(p) == uint16_t(65530 + 7 * k));
+      for (int i = 4; i < 32; ++i) CHECK(p[i] == 0);
+      for (int f = 0; f < 7; ++f) {
+        const auto* lr = p + 32 + f * 32;
+        CHECK(memcmp(lr, lr + 4, 4) == 0);
+        CHECK(lr[0] == (lr[1] & 128 ? 255 : 0));
+        audible |= lr[1] != 0 || lr[2] != 0 || lr[3] != 0;
+        for (int i = 8; i < 32; ++i) CHECK(lr[i] == 0); // all six FX returns
+      }
+    }
+    CHECK(audible);
+    b.out_done();
+    const unsigned before = bridge::test_tap_blocks;
+    deliver(true, 1); // never decode a partial trailing block
+    CHECK(bridge::test_tap_blocks == before + blocks - 1);
+    while (!b.host.out.empty()) b.out_done();
+    CObUsb::Dn2Returns(TRUE, 255); // models a matching native-mode ACK
+    deliver(true, 0); // mode change flushes old stereo-mode FIFO samples
+    for (unsigned k = 0; k < blocks; ++k)
+      for (int i = 32; i < 256; ++i) CHECK(b.host.out.front()->buf[k * 256 + i] == 0);
+    b.out_done();
+    for (auto& f : fr)
+      for (int v = 0; v < 8; ++v) f[v] = int16_t((v & 1 ? -1 : 1) * (700 + 100 * v));
+    CHECK(g_Output.Push(fr, 128) == 128);
+    CHECK(CObUsb::CaptureAlloc());
+    const unsigned capturePart = blocks == 1 ? 2 : 0;
+    CHECK(!CObUsb::CaptureStart(FALSE, 8));
+    CHECK(!CObUsb::CaptureStart(FALSE, capturePart, 17));
+    const unsigned referenceTrack = blocks == 1 ? 15 : 0;
+    CHECK(CObUsb::CaptureStart(FALSE, capturePart, referenceTrack));
+    CHECK(CObUsb::CaptureReference() == referenceTrack);
+    CHECK(CObUsb::CapturePart() == capturePart);
+    CHECK(CObUsb::CaptureNative());
+    deliver(true, 0);
+    for (unsigned k = 0; k < blocks; ++k)
+      for (int f = 0; f < 7; ++f)
+        for (int v = 0; v < 8; ++v) {
+          const auto* sample = b.host.out.front()->buf + k * 256 + 32 + f * 32 + v * 4;
+          const double expected = double(fr[0][v]) * 65536.0 / (11469.0 / 32768.0);
+          const double delta = double(sidecar::dn2::read24(sample + 1)) - expected;
+          CHECK(delta > -257 && delta < 257);
+        }
+    b.out_done();
+    const auto* captured = reinterpret_cast<const int32_t*>(CObUsb::CaptureData());
+    CHECK(CObUsb::CaptureFramesDone() == blocks * 7);
+    CHECK(CObUsb::CaptureOutFramesDone() == blocks * 7);
+    for (unsigned k = 0; k < blocks; ++k)
+      for (int f = 0; f < 7; ++f) {
+        const auto* c = captured + (k * 7 + f) * 4;
+        CHECK(c[0] == -256); // DN2 track 1 stem downmix, not MAIN
+        CHECK(c[1] == (referenceTrack ? 699 * 256 : (f + 1) * 1000 * 256));
+        CHECK(c[2] == int32_t(fr[0][capturePart]) * 65536); // selected raw tap before native mixer-gain recovery
+        CHECK(c[3] == 0);
+      }
+    const unsigned marker = CObUsb::CaptureFramesDone() * 4 + 3;
+    CObUsb::CaptureMarkMIDI(); CObUsb::CaptureMarkNative(1);
+    CHECK(captured[marker] == 0); // unrelated MIDI/track must not create a reference
+    CObUsb::CaptureMarkNative(capturePart);
+    CHECK(captured[marker] == CObUsb::CaptureMarkerMIDI);
+    CObUsb::CaptureStop();
+    CObUsb::Dn2Returns(TRUE, 0); // expiry/teardown stays dry and silent
+    deliver(true, 0);
+    for (unsigned k = 0; k < blocks; ++k)
+      for (int i = 32; i < 256; ++i) CHECK(b.host.out.front()->buf[k * 256 + i] == 0);
+    b.out_done();
+    CObUsb::Dn2Returns(FALSE, 0);
+    bridge::test_tap_on = false;
+    options->num.clear();
+    options->str.clear();
+  }
+  core::device::g_dn2_chosen = false;
 
   // The A4 beside the Rytm
   memcpy(g_a4, g_rytm, sizeof g_rytm);

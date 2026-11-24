@@ -40,6 +40,8 @@ static bool s_said;                       // a box's hello was taken this boot
 static bool s_by_usb;                     // this change of folder comes from the Rytm's USB id
 static bool s_settle;                     // this boot came from one
 static uint32_t s_boot_ms;
+static const Profile* s_boot_profile;
+static bool s_booted;
 static constexpr char kDeviceFile[] = "/.rytm/device";   // the last box's id, decimal; none: the Rytm
 // The Pi's own files, the same for every box: the network, the pairing, the screen, the black box, this choice.
 static const char* const kMachine[] = {"wifi", "pair", "display", "prevboot", "blackbox", "device", "recspeed", "storbench", "wpa.conf"};
@@ -56,6 +58,7 @@ CORE_COLD const Profile* by_id(uint16_t id) {
 }
 
 CORE_COLD const Profile* by_usb(uint16_t vid, uint16_t pid) {
+  if (s_boot_profile && (vid != s_boot_profile->usb_vid || pid != s_boot_profile->usb_pid)) return nullptr;
   for (int k = 0; k < s_n; ++k)
     if (s_list[k]->usb_vid == vid && s_list[k]->usb_pid == pid && s_list[k]->audio && (!s_list[k]->audio_by_hello || g_link.box == s_list[k])) return s_list[k];
   return nullptr;
@@ -91,7 +94,26 @@ static inline bool other_folder(const Link& l, const Profile* p) {
 }
 
 // Boot, no voices yet: the box of the last run, its folder, its output filter (select's without the reset).
+CORE_COLD bool boot_as(uint16_t id) {
+  const Profile* p = by_id(id);
+  if (s_booted || !p || p == &kRytm || !p->state_dir) return false;
+  s_boot_profile = p;
+  return true;
+}
+
 CORE_COLD void boot() {
+  s_booted = true;
+  if (s_boot_profile) {
+    Link& l = g_link;
+    l.state = s_boot_profile->state_dir;
+    Fs().mkdir(l.state);
+    l.out = hooks.to_rytm;
+    hooks.to_rytm = filtered_out;
+    l.box = s_boot_profile;
+    out::set_trim(2, l.box->trk10);
+    log(CORE_STR("device: experimental boot %s, state in %s"), l.box->name, l.state);
+    return;
+  }
   fmt::recover(kDeviceFile);
   File f;
   if (!f.open(kDeviceFile, kRead)) return;
@@ -123,6 +145,7 @@ static CORE_COLD void change_folder(Link& l, const Profile* p) {
 CORE_COLD bool leaving() { return g_link.saving; }
 
 CORE_COLD bool step(bool settled) {
+  if (s_boot_profile) return false; // no saved-device change or automatic reboot in explicit mode
   Link& l = g_link;
   if (s_rytm_usb && !s_said && !s_by_usb && !l.saving && hooks.device_restart && other_folder(l, nullptr)) {
     s_by_usb = true;
@@ -167,6 +190,8 @@ CORE_COLD void reset() {
   select(g_link, nullptr);
   strip::reset();
   s_rytm_usb = s_said = s_by_usb = s_settle = false;
+  s_boot_profile = nullptr;
+  s_booted = false;
   g_link.state = nullptr;   // (a board restart, for the tests: the choice is made once a boot)
 }
 
@@ -181,6 +206,7 @@ CORE_COLD bool add(const Profile* p) {
 }
 
 CORE_COLD void hello(Link& l, const uint8_t* d, int len) {
+  if (s_boot_profile) { ++l.dropped; return; }
   if (len < 10 || d[5] != 1) return;
   int id = d[6] << 7 | d[7];
   const Profile* p = nullptr;
@@ -304,6 +330,7 @@ CORE_COLD bool translate(Link& l, const uint8_t*& d, int& len, uint8_t* m) {
     return true;
   }
   if (is_sidecar(d, len) && d[4] == 0x35) {   // a Rytm's USB port came up
+    if (s_boot_profile) return ++l.dropped, false;
     if (other_folder(l, nullptr)) {
       if (hooks.device_restart) change_folder(l, nullptr);
       return ++l.dropped, false;

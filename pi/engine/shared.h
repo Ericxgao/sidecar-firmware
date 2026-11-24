@@ -11,6 +11,8 @@
 #include "peak_fan.h"
 #include "records.h"
 #include "spsc.h"
+#include "dn2_transport.h"
+#include "dn2_ui_wire.h"
 
 // g_MidiOut: a burst of replies (0x10: pool table, JUNO and FM names; a 0D listing) fits whole while core 0 sends
 const unsigned kMidiOutBytes = 32768;
@@ -24,6 +26,12 @@ extern Spsc<uint8_t, 8192> g_MidiIn;
 extern Spsc<uint8_t, kMidiOutBytes> g_MidiOut;
 extern RecordReader<Spsc<uint8_t, kMidiOutBytes>> g_ToHost;	// g_MidiOut's only reader: every consumer takes whole records
 extern Spsc<TCmd, 16> g_Cmds;
+extern Spsc<dn2_native::LinkRequest, 4> g_Dn2LinkOut;
+extern Spsc<dn2_native::UiReply, 2> g_Dn2UiOut;
+// Control core publishes the current UI session; core 0 drops obsolete replies.
+extern uint32_t g_nDn2UiToken;
+// Core 0 publishes atomically: bit 0 transport available; upper bits enumeration epoch.
+extern uint32_t g_nDn2Transport;
 // The Pi's own keyboards (core/keys.h): their channel messages for the control core, each (src << 24 | status << 16 |
 // d1 << 8 | d2) - src 0..3 a USB-A keyboard, 4 the computer; status 0xF4 a source plugged in (d1 1) / out (d1 0), its
 // name in g_KeyNames[src] (written before the push). Producers: core 0's USB IRQs (xHCI, the gadget: they do not nest)

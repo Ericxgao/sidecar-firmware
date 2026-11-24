@@ -50,6 +50,7 @@ private:
 	boolean m_bSelfTest = FALSE;
 	unsigned m_nCaptureStart = 0;
 	boolean m_bDumping = FALSE;
+	boolean m_bRamCapture = FALSE;
 	const u8 *m_pDump = 0;
 	unsigned m_nDumpLen = 0, m_nDumpPos = 0;
 	u32 m_nCrc = 0;

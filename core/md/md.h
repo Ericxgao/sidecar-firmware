@@ -52,6 +52,8 @@ const char* engine_name(int e);
 const char* type_name(int e, int t);
 // voice vi's P(k+1) as the Rytm's MD page labels it for the set it plays (its short label: "DEC"), null none (unused)
 const char* label(int vi, int k);
+// Read-only model metadata, independent of any currently sounding voice.
+bool control_info(int set, int k, const char** name, const char** short_name, int* value);
 uint32_t state_bytes();
 // The control core's cost (review M4: /status "md", and the boot bench's line): ENGINE / TYPE changes (a params()
 // that changes the set, then the trig that renders the old voice's 2 ms tail and sets the new one up) and the most

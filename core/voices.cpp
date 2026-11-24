@@ -869,9 +869,10 @@ static inline int engine_sig(const V& x) {   // E0: which engine a voice plays (
 
 // A 0x04 TRIG+PARAMS or 0x03 PARAMS report for voice d[5] & 7: the machine (voice byte & 0x78, exactly; only
 // the voice's current engine renders), P1..P16, and on a trig the note. Per message, never per sample: cold.
+static float user_host_gain[kVoices] = {1, 1, 1, 1, 1, 1, 1, 1};
 static bool reported[kVoices];   // a 0x03 / 0x04 came for the voice (voice_machine_hint's own does not count)
 static bool hinting = false;
-__attribute__((noinline)) CORE_COLD void voice_report(int cmd, const uint8_t* d, int len) {
+__attribute__((noinline)) static CORE_COLD void voice_report_impl(int cmd, const uint8_t* d, int len, const float* precise, int native_slot = -1) {
   int vi = d[5] & 7;
   // F-b1: the first real report after a 33's hint is the engine's entry all the same (JUNO's knobs to the Rytm, 6-OP's
   // PAT); the hint itself sends the Rytm nothing
@@ -888,6 +889,7 @@ __attribute__((noinline)) CORE_COLD void voice_report(int cmd, const uint8_t* d,
   if (cmd == 0x04 && len >= 25) { note = d[6]; vel = d[7]; raw = d + 8; np = len >= 41 ? 16 : 8; if (len == 43) tag = d[40] << 7 | d[41]; }
   else if (cmd == 0x03 && len >= 23) { raw = d + 6; np = len >= 39 ? 16 : 8; if (len == 41) tag = d[38] << 7 | d[39]; }
   else return;
+  user_host_gain[vi] = 1.0f; // a valid ordinary report leaves native track gain
   if (cmd == 0x04) silenced[vi] = false;
   if (cmd == 0x04 && hooks.trig_seen) hooks.trig_seen();
   V& x = v[vi];
@@ -899,8 +901,8 @@ __attribute__((noinline)) CORE_COLD void voice_report(int cmd, const uint8_t* d,
   x.mi = m == kMidiMachine;
   if (was_mi && !x.mi) midim::leave(vi);
   bool was_ms = x.ms, was_wt = x.wt, was_gr = x.gr, was_cp = x.cp;
-  if (nm::forced(vi) && user_slot_of(m) < 0) m = nm::forced(vi);   // msamp= / wt= / gr=voice:V (the PoC, msamp.h)
-  if (livein::forced(vi) && user_slot_of(m) < 0) m = kLiveMachine;   // livein=voice:V (until the Rytm reports 0x78)
+  if (native_slot != -2 && nm::forced(vi) && user_slot_of(m) < 0) m = nm::forced(vi);   // msamp= / wt= / gr=voice:V (the PoC, msamp.h)
+  if (native_slot != -2 && livein::forced(vi) && user_slot_of(m) < 0) m = kLiveMachine;   // livein=voice:V (until the Rytm reports 0x78)
   bool was_li = x.li;
   x.li = m == kLiveMachine;
   if (was_li != x.li) livein::silence(vi);   // (left it, or a fresh start: the read point at the newest block)
@@ -925,7 +927,8 @@ __attribute__((noinline)) CORE_COLD void voice_report(int cmd, const uint8_t* d,
   bool tagged = cmd == 0x04 ? len == 43 : len == 41;
   x.smpl = m == kDspSample && (tagged ? tag == kSmplTag : x.smpl);
   if (!x.dsps) ram_release(vi);   // another machine: no RAM note to resume
-  decode_params(raw, np, x.p);
+  if (precise) memcpy(x.p, precise, 16 * sizeof(float));
+  else decode_params(raw, np, x.p);
   ui::remote_params(vi, m, x.p, np);   // the remote UI's held edits (core/ui/remote.h)
 #if CORE_POLY
   seq::params_in(vi, x.p, np);         // seq-ux: a param the sequencer's step locked keeps its lock (core/seq/seq.h)
@@ -941,7 +944,7 @@ __attribute__((noinline)) CORE_COLD void voice_report(int cmd, const uint8_t* d,
   if (was_fm && !x.fm) poly::silence(vi);
 #endif
   int was_user = x.user;
-  x.user = (int8_t)user_slot_of(m);   // U1..U5: 0x50 0x58 0x60 0x68 0x70
+  x.user = (int8_t)(native_slot >= 0 ? native_slot : user_slot_of(m));   // U1..U5: 0x50 0x58 0x60 0x68 0x70
 #if CORE_POLY
   // E0: the sequencer's instances were of another engine: gone (a new note makes them again); else they take the knobs
   if (engine_sig(x) != was_kind || x.user != was_user) {
@@ -1026,7 +1029,8 @@ __attribute__((noinline)) CORE_COLD void voice_report(int cmd, const uint8_t* d,
       juno_rytm[vi][i] = (uint8_t)(r < 0 ? 0 : r > 127 ? 127 : r);
     }
     const bool fresh = !was_juno || first;
-    juno_select(vi, (int)x.p[0], !hinting && (cmd == 0x03 || fresh), fresh);
+    if (native_slot == -2) juno_holding[vi] = false;
+    juno_select(vi, (int)x.p[0], native_slot != -2 && !hinting && (cmd == 0x03 || fresh), fresh);
   }
 #if CORE_POLY
   if (x.juno) inst::knobs(vi);   // E0: the instances' knobs (a PAT change reaches them at their next note)
@@ -1053,6 +1057,57 @@ __attribute__((noinline)) CORE_COLD void voice_report(int cmd, const uint8_t* d,
 // A new link to the Rytm (its restart; 0026's second hello and later): what it reported before is gone with its working
 // state, so the next 33 names the voices' machines again (voice_machine_hint) instead of keeping the old engines.
 CORE_COLD void voice_reports_forget() { memset(reported, 0, sizeof reported); }
+CORE_COLD void voice_report(int cmd, const uint8_t* d, int len) {
+  voice_report_impl(cmd, d, len, nullptr);
+}
+
+CORE_COLD bool voice_user_params(int vi, int slot, const float params[16], float level) {
+  if (vi < 0 || vi >= kVoices || slot < 0 || slot >= um::kSlots || !params ||
+      !(level >= 0.0f && level <= 1.0f)) return false;
+  for (int i = 0; i < 16; ++i)
+    if (!(params[i] >= 0.0f && params[i] < 128.0f)) return false;
+  uint8_t report[39] = {0xf0, 0x7d, 0x52, 0x54, 3, uint8_t(0x50 + vi)};
+  report[38] = 0xf7;
+  voice_report_impl(3, report, sizeof report, params, slot);
+  user_host_gain[vi] = level;
+  return true;
+}
+
+CORE_COLD bool voice_builtin_params(int vi, unsigned machine, const float params[16], float level) {
+  if (vi<0 || vi>=kVoices || !params || !(level>=0 && level<=1) ||
+      (machine!=kPlaits && machine!=kJuno && machine!=kDaisy && machine!=kFm && machine!=kMd)) return false;
+  for(int k=0;k<16;++k) if(!(params[k]>=0 && params[k]<128)) return false;
+  uint8_t report[41]={0xf0,0x7d,0x52,0x54,3,uint8_t(machine|unsigned(vi))};
+  if(machine==kMd) {report[38]=uint8_t(md::kLayoutTag>>7);report[39]=uint8_t(md::kLayoutTag&127);}
+  report[40]=0xf7;
+  voice_report_impl(3,report,sizeof report,params,-2);
+  user_host_gain[vi]=level;
+  return true;
+}
+
+CORE_COLD bool voice_builtin_on(int vi,float note,float velocity) {
+  if(vi<0 || vi>=kVoices || v[vi].user>=0 || !(note>=0 && note<128) || !(velocity>=0 && velocity<=1)) return false;
+  // PAT edits are deferred until the next hit in the existing FM engine.
+  if(v[vi].fm) fm_select(vi,int(v[vi].p[0]));
+  voice_play(vi,int(note),int(velocity*127.0f+0.5f));
+  return true;
+}
+
+CORE_COLD void voice_preset_name(unsigned machine,unsigned preset,char* out,unsigned capacity) {
+  if(!out || !capacity)return;
+  out[0]=0;preset=preset>127?127:preset;
+  const char* name="";const uint8_t* bytes=nullptr;
+  if(machine==kJuno) juno_pick(int(preset),&bytes,&name);
+  if(machine==kFm) {
+    int total=dxlib.listed()?dxlib.listed():dx7::kRomVoices;
+    unsigned index=preset>=unsigned(total)?unsigned(total-1):preset;
+    name=dxlib.listed()?dxlib.slot(index).name:reinterpret_cast<const char*>(dx7::rom_bank(index/32)+128*(index%32)+118);
+  }
+  unsigned n=0;
+  for(;n+1<capacity && (machine!=kFm || n<10) && name[n];++n) out[n]=name[n]>=32 && name[n]<=126?name[n]:'_';
+  while(n && out[n-1]==' ') --n;
+  out[n]=0;
+}
 
 // polyuser-4 F-b1 (a cold boot: the Pi and the Rytm powered on together): the voice's engine came only from 0021's
 // 0x03 / 0x04, and a captured poly track never trigs on the Rytm, so the one boot-time 0x03 (sent before the Pi
@@ -1313,12 +1368,16 @@ uint32_t render_voices(int16_t (*ring)[kVoices], int ring_len, int w, int v0, in
       if (stv[i] && hooks.user_render2) {   // PRE / POST: a stereo plugin's R (API 3), else L = R below
         float r[kBlock];
         ustv[i] = hooks.user_render2(i, o, r);
+        if (ustv[i] && user_host_gain[i] != 1.0f)
+          for (int s = 0; s < kBlock; ++s) r[s] *= user_host_gain[i];
         if (ustv[i]) simd::clip_rows(ring_r, row, i, r, kBlock);
       } else if (hooks.user_render) {
         hooks.user_render(i, o);
       } else {
         for (int s = 0; s < kBlock; ++s) o[s] = 0.0f;
       }
+      if (user_host_gain[i] != 1.0f)
+        for (int s = 0; s < kBlock; ++s) o[s] *= user_host_gain[i];
       simd::clip_rows(ring, row, i, o, kBlock);
       continue;
     }
@@ -1486,11 +1545,17 @@ uint32_t render_voices(int16_t (*ring)[kVoices], int ring_len, int w, int v0, in
 #endif
   {   // kVoiceGain (voices.h): every voice's rows after its chain, rounded (Q15; nothing over int16 since the gain is < 1)
     static_assert(kVoiceGain > 0.0f && kVoiceGain <= 1.0f, "kVoiceGain: a cut");
-    constexpr int32_t q = (int32_t)(kVoiceGain * 32768.0f + 0.5f);
+    constexpr int32_t q = kVoiceGainQ15;
     for (int i = v0; i < v1; ++i)
       for (int s = 0; s < kBlock; ++s) {
         ring[row[s]][i] = (int16_t)((ring[row[s]][i] * q + 16384) >> 15);
         if (stv[i]) ring_r[row[s]][i] = (int16_t)((ring_r[row[s]][i] * q + 16384) >> 15);
+        // User voices already take this gain before their insert chain. Native
+        // built-ins need the track gain too when using the legacy stereo return.
+        if (v[i].user < 0 && user_host_gain[i] != 1.0f) {
+          ring[row[s]][i] = (int16_t)(ring[row[s]][i] * user_host_gain[i]);
+          if (stv[i]) ring_r[row[s]][i] = (int16_t)(ring_r[row[s]][i] * user_host_gain[i]);
+        }
       }
   }
   for (int i = v0; i < v1; ++i) {   // CC 120: the silenced voices ramp out (5 ms), a trig brings them back (1 ms)

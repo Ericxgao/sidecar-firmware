@@ -30,6 +30,12 @@
 class CObUsb : public CUSBFunction
 {
 public:
+    // Only a matching DN2 firmware ACK may enable raw native-return lanes.
+    // Ending a dry session keeps the lane interpretation but silences all parts.
+    static void Dn2Returns (boolean native, unsigned mask) {
+        __atomic_store_n (&s_nDn2Route, native ? 0x100u | (mask & 255u) : 0u, __ATOMIC_RELEASE);
+    }
+    static unsigned Dn2ReturnState () { return __atomic_load_n (&s_nDn2Route, __ATOMIC_ACQUIRE); }
 	static const unsigned MaxURBs = 16;		// <= XHCI_EP_MAX_URBS (circle-xhci-urbqueue.patch)
 	static const unsigned MaxBlocks = 8;
 
@@ -83,8 +89,13 @@ public:
 	static const unsigned CaptureMarkers = 99;
 	static const s32 CaptureMarkerMIDI = 0x10000000, CaptureMarkerTrig = 0x20000000;
 	static void CaptureMarkMIDI (void);
+	static void CaptureMarkNative (unsigned track);
+	static boolean CaptureNative (void) { return s_bCapNative; }
+	static unsigned CapturePart (void) { return s_nCapPart; }
+	static unsigned CaptureReference (void) { return s_nCapReference; }
+	static unsigned CaptureOutFramesDone (void) { return s_nCapOutPos; }
 	static boolean CaptureAlloc (void);
-	static boolean CaptureStart (boolean bSelfTest = FALSE);	// FALSE: no buffer, no stream, or busy
+	static boolean CaptureStart (boolean bSelfTest = FALSE, unsigned nNativePart = 0, unsigned nReferenceTrack = 0);	// reference: 0 MAIN, 1..16 DN2 track
 	static void CaptureFeed (const s32 *pOutL, unsigned nFrames);	// the self-test's OUT MAIN L (no stream)
 	static void CaptureStop (void);			// abandon a capture (stream gone)
 	static boolean CaptureActive (void)	{ return s_bCapOn; }
@@ -136,6 +147,11 @@ public:
 #endif
 
 private:
+    static boolean s_bCapNative;
+    static unsigned s_nCapPart;
+    static unsigned s_nCapReference;
+    static unsigned s_nDn2Route;
+    unsigned m_nDn2Route = 0;
 	boolean ScanDescriptors (void);			// log everything, locate alt 3 endpoints
 	boolean SubmitIn (unsigned i);
 	boolean SubmitOut (unsigned i);

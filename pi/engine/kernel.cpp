@@ -63,6 +63,7 @@ static volatile unsigned s_nTempC;	// the SoC temperature as the stats line last
 #include "hello_gate.h"
 #include "box_list.h"
 #include "device/a4.h"
+#include "device/dn2.h"
 #include "card_pass.h"	// MIDI between the card requests
 #include "sendfx_pi.h"
 #include "paircode_pi.h"	// the pairing code that gates the network (paircode.h)
@@ -384,8 +385,24 @@ boolean CKernel::Initialize (void)
 	m_Logger.Write (From, LogNotice, "boot: sendfx init done in %u us", m_Timer.GetClockTicks () - t0);
 	BootStep (2);
 	t0 = m_Timer.GetClockTicks ();
-	bridge::selftest_content ();
+	const boolean bDn2 = m_Options.GetAppOptionDecimal ("dn2", 0) == 1;
+	if (!bDn2) bridge::selftest_content ();
+	const unsigned nDn2Channel = m_Options.GetAppOptionDecimal ("dn2channel", 1);
+	if (bDn2)
+	{
+		if (nDn2Channel < 1 || nDn2Channel > 16 || !core::device::add (&core::device::kDn2)
+		    || !core::device::boot_as (core::device::kIdDn2))
+		{
+			m_Logger.Write (From, LogError, "DN2: cannot select experimental mode (dn2channel must be 1..16)");
+			return FALSE;
+		}
+	}
 	boolean bCard = bridge::begin (ToHost);
+	if (bDn2 && core::device::active ().id != core::device::kIdDn2)
+	{
+		m_Logger.Write (From, LogError, "DN2: state initialization failed; no stream will start");
+		return FALSE;
+	}
 	m_Logger.Write (From, LogNotice, "engine: begin %s in %u ms (%d folders, project \"%s\", pool %d)",
 			bCard ? "ok" : "WITHOUT a card", (m_Timer.GetClockTicks () - t0) / 1000,
 			bridge::card_folders (), bridge::project (), bridge::pool_slots ());
@@ -409,7 +426,7 @@ boolean CKernel::Initialize (void)
 	// core 3, as before
 	bridge::card_worker (m_Options.GetAppOptionDecimal ("cardq", 1) != 0);
 	BootStep (3);
-	m_Usb.SetSend (m_Options.GetAppOptionDecimal ("tohost", 1) != 0);	// tohost=0: the replies dropped, as before
+	m_Usb.SetSend (!bDn2 && m_Options.GetAppOptionDecimal ("tohost", 1) != 0);
 	boolean bBench = m_Options.GetAppOptionDecimal ("bench", 1) != 0;
 	LoadClock (bCard);				// the CPU clock option, before the bench: the bench measures the clock the engine plays at
 #if RASPPI >= 5
@@ -430,13 +447,15 @@ boolean CKernel::Initialize (void)
 	// (docs/STEREO.md "Measurements"); the console's stereo=trim:pre|post:DB10 for the session
 	bridge::stereo_trim (0, atoi (m_Options.GetAppOptionString ("trimpre", "0")));
 	bridge::stereo_trim (1, atoi (m_Options.GetAppOptionString ("trimpost", "0")));
-	// fifo=: the target for every link; without it each link's own (UseLink: FifoUsb, FifoTcp). split= 4 is the
-	// plan's default (docs/pi-engine.md "Measurements")
-	if (m_Options.GetAppOptionString ("fifo", 0) != 0) CEngineCores::FixFifoTarget ();
-	CEngineCores::Configure (m_Options.GetAppOptionDecimal ("fifo", FifoUsb),
+	// DN2 defaults to the validated eight-part native session and FIFO48.
+	// dn2auto=0 keeps manual/stock-MIDI startup. Explicit fifo= still wins.
+	const boolean bDn2Auto = bDn2 && m_Options.GetAppOptionDecimal ("dn2auto", 1) != 0;
+	if (bDn2Auto || m_Options.GetAppOptionString ("fifo", 0) != 0) CEngineCores::FixFifoTarget ();
+	CEngineCores::Configure (m_Options.GetAppOptionDecimal ("fifo", bDn2Auto ? 48 : FifoUsb),
 				 strcmp (m_Options.GetAppOptionString ("notes", "off"), "on") == 0
 				 || strcmp (m_Options.GetAppOptionString ("notes", "off"), "1") == 0);
 	CEngineCores::SetSplit (m_Options.GetAppOptionDecimal ("split", 4));	// voices 0-3 core 1, 4-7 core 2
+	CEngineCores::ConfigureDn2 (bDn2 ? nDn2Channel : 0, bDn2Auto);
 	CEngineCores::SetIdleWfe (m_Options.GetAppOptionDecimal ("idlewfe", 1) != 0);	// docs/pi-engine.md "Idle sleep"
 	ApplyBudget (m_nClockMHz, TRUE);			// the voice guard's budget, for the clock the engine runs at
 	m_Console.Initialize ();
@@ -1745,7 +1764,8 @@ static boolean KeysTap (const u8 *p)
 }
 static TUsbBox BoxOf (CDevice *p)
 {
-	return usb_box (p->GetProperty (CDevice::PropertyVendor), p->GetProperty (CDevice::PropertyProduct));
+	return usb_box (p->GetProperty (CDevice::PropertyVendor), p->GetProperty (CDevice::PropertyProduct),
+			core::device::active ().id == core::device::kIdDn2);
 }
 
 // The Rytm's USB MIDI interface (Circle's umidiN) once enumerated: read only. Another Elektron box: left alone (usb_box.h). Every other USB MIDI device: a keyboard.
@@ -1804,6 +1824,7 @@ void CKernel::UpdateMIDI (void)
 			const char *pBox = p->GetProperty (CDevice::PropertyProduct);	// the box's own name: the profile follows its hello, later
 			m_Logger.Write (From, LogNotice, "midi: %s's USB MIDI found (%s), listening; the engine's replies %s",
 					pBox != 0 && *pBox ? pBox : "the host box", (const char *) Name,
+					core::device::active ().id == core::device::kIdDn2 ? "are disabled (DN2 experimental input only)" :
 					m_Options.GetAppOptionDecimal ("tohost", 1) != 0 ? "go to it (host link)" : "are dropped (tohost=0)");
 			continue;
 		}

@@ -89,10 +89,10 @@ inline void put_voice_frame(uint8_t* blk, int channels, int f, const int16_t* v,
   memset(fr, 0, 4 * channels);
   if (!v) return;
   for (int i = 0; i < kVoices; ++i)
-    if (map[i] < channels) put_be32(fr + 4 * map[i], (int32_t)v[i] << 16);
+    if (map[i] < channels) put_be32(fr + 4 * map[i], (int32_t)v[i] * 65536);
   if (mirror >= 0 && mirror < kVoices && channels >= 2) {
-    put_be32(fr, (int32_t)v[mirror] << 16);
-    put_be32(fr + 4, (int32_t)v[mirror] << 16);
+    put_be32(fr, (int32_t)v[mirror] * 65536);
+    put_be32(fr + 4, (int32_t)v[mirror] * 65536);
   }
 }
 

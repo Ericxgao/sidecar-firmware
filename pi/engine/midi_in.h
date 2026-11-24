@@ -12,6 +12,7 @@ class MidiIn {
   typedef void (*RealtimeFn)(uint8_t status, uint16_t spp);
   MidiIn(SysExFn sx, ChannelFn ch, RealtimeFn rt = nullptr) : sx_fn_(sx), ch_fn_(ch), rt_fn_(rt) {}
   void Feed(uint8_t b);
+  void ResetStream() { sxn_ = -1; over_ = false; status_ = 0; have_ = need_ = 0; }
   uint32_t Clocks() const { return clocks_; }
   uint32_t SysExDropped() const { return dropped_; }
   uint32_t SysExCount() const { return count_; }

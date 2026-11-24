@@ -37,6 +37,7 @@ public:
 
 	CEngineCores (CMemorySystem *pMemorySystem) : CMultiCoreSupport (pMemorySystem) {}
 	static void Configure (unsigned nFifoTarget, boolean bNotes);
+	static void ConfigureDn2 (unsigned nChannel, boolean bAutoNative); // boot only: channel 1..16, 0 off; native waits for ACK/RESET
 	static void SetSplit (unsigned nVoicesCore1);	// cmdline split=N: voices 0..N-1 on core 1, N..7 on core 2
 	static void BenchCore (unsigned nCore);		// this core's bench (core 0 calls it; Run does for 1-3)
 	static void BenchStart (boolean bOn);		// core 0, before Initialize: cores 1-3 bench in turn (or not)

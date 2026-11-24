@@ -72,6 +72,8 @@ int main() {
   CHECK(s[0] == 0x80 && s[1] == 0 && s[2] == 0 && s[3] == 0);
   ob::put_voice_frame(blk, 12, 0, v, ob::kVoiceToRytm, 0);   // mirror voice 0 to MAIN L/R
   CHECK(ob::block_sample(blk, 12, 0, 0) == 65536 && ob::block_sample(blk, 12, 0, 1) == 65536);
+  ob::put_voice_frame(blk, 12, 0, v, ob::kVoiceToRytm, 7);
+  CHECK(ob::block_sample(blk, 12, 0, 0) == INT32_MIN && ob::block_sample(blk, 12, 0, 1) == INT32_MIN);
   ob::put_voice_frame(blk, 12, 0, nullptr, ob::kVoiceToRytm, 0);
   for (int c = 0; c < 12; ++c) CHECK(ob::block_sample(blk, 12, 0, c) == 0);
 

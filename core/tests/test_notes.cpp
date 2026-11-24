@@ -47,7 +47,7 @@ int main() {
   CHECK(a.SetMachine(0, "grain") && a.Machine(0) == 0x20 && !strcmp(NoteAdapter::Name(0x20), "dsps"));
   a.Channel(0x90, 37, 90);
   CHECK(out[7][5] == 0x20 && out[7][8 + 2 * 10] == 1 && out[7][8 + 2 * 11] == 56);   // GRAIN: MOD (P12) 56
-  CHECK(!strcmp(NoteAdapter::Names(), "plaits juno daisy dsps grain fm md wt gr livein chop") && !a.SetMachine(0, "dd"));   // (DIGIDRUM: removed)
+  CHECK(!strcmp(NoteAdapter::Names(), "plaits juno daisy dsps grain fm md wt gr livein chop u1 u2 u3 u4 u5") && !a.SetMachine(0, "dd"));   // (DIGIDRUM: removed)
   {   // CC 123 closes the sounding note; CC 120 on a voice channel silences it (no report), on any channel clears the FX
     size_t n0 = out.size();
     a.Channel(0xB3, 123, 0);                // channel 4, nothing sounding: no note-off

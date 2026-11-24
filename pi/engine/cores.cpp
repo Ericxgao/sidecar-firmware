@@ -2,6 +2,7 @@
 // render their halves of s_Block and publish s_nDone; core 3 waits (in wfe, with a 20 ms limit), then pushes the
 // block into the output stage. Nothing else touches the engine core while a block renders.
 #include "cores.h"
+#include "ob_usb.h"
 #include "crumb.h"	// the crash breadcrumb: each core's heartbeat and section (2026-10-29)
 
 #include <circle/logger.h>
@@ -14,6 +15,10 @@
 #include "midi_in.h"
 #include "lagdiag.h"	// the Rytm report stream timing (RxDiag; core 3 writes, core 0 prints)
 #include "notes.h"
+#include "dn2_midi.h"
+#include "dn2_session.h"
+#include "dn2_ui.h"
+#include "dn2_builtins.h"
 #include "paircode_pi.h"
 #include "usbc_pi.h"
 #include "xypad_pi.h"
@@ -107,7 +112,62 @@ static void ToCore (const u8 *pData, int nLength)
 		s_nSlowSx++;
 	}
 }
-static core::NoteAdapter s_Notes (ToCore);
+static core::NoteAdapter s_Notes (ToCore, um::slot_defaults);
+static unsigned s_nDn2Channel;
+static uint32_t Dn2NowMs () { return (uint32_t) (Ticks () * 1000 / TickRate ()); }
+struct Dn2Endpoint {
+	unsigned parts = 0;
+	bool native_returns = false;
+	bool Send (const dn2_native::LinkControl& control, uint32_t epoch) {
+		uint32_t state = __atomic_load_n (&g_nDn2Transport, __ATOMIC_ACQUIRE);
+		return (state & 1u) && (state >> 1) == epoch && g_Dn2LinkOut.push ({control, epoch});
+	}
+	bool Begin (unsigned track, uint8_t returns) {
+        if (returns > 1) return false;
+		parts = track == 16 ? 8 : 1;
+		for (unsigned i = 0; i < parts; ++i) s_Notes.SuspendVoice (i);
+		if (bridge::dn2_native_begin (track, returns)) {
+			native_returns = returns != 0;
+			CObUsb::Dn2Returns (native_returns, (1u << parts) - 1);
+			return true;
+		}
+		for (unsigned i = 0; i < parts; ++i) s_Notes.RestoreVoice (i);
+		parts = 0;
+		return false;
+	}
+	void End () {
+		__atomic_store_n (&g_nDn2UiToken, 0, __ATOMIC_RELEASE);
+		CObUsb::Dn2Returns (native_returns, 0);
+		bridge::dn2_native_end ();
+		for (unsigned i = 0; i < parts; ++i) s_Notes.RestoreVoice (i);
+		parts = 0;
+	}
+	bool Event (const uint8_t* packet, size_t bytes) { return bridge::dn2_native_receive (packet, bytes); }
+};
+static Dn2Endpoint s_Dn2Endpoint;
+static dn2_native::Session<Dn2Endpoint> s_Dn2Session (s_Dn2Endpoint);
+struct Dn2PluginCatalog {
+	void Catalog (unsigned index, um::NativeCatalogEntry& e) { um::native_catalog (index, e); }
+};
+struct Dn2Catalog {
+	int track=-1;unsigned selector=0;
+	void Context(int t,unsigned s) {track=t;selector=s;}
+	unsigned Load (unsigned track, const char* id) {
+		const int selected = s_Dn2Session.Track ();
+		if (selected == 16 ? track >= 8 : track != unsigned(selected)) return RMP_PST_BAD;
+		return dn2_native::builtin::find(id) >= 0 ? RMP_PST_READY : um::native_load (id);
+	}
+	void Descriptor (const char* id, um::NativeDescriptor& d) {
+		int h=dn2_native::builtin::find(id);
+		if(h<0) {um::native_descriptor(id,d);return;}
+		bridge::dn2_builtin_descriptor(h,track,selector,d);
+	}
+	void Catalog (unsigned index, um::NativeCatalogEntry& e) { Dn2PluginCatalog p;dn2_native::builtin::catalog(p,index,e); }
+	int Names (const char* id, unsigned p, char names[][8]) {
+		int h=dn2_native::builtin::find(id);
+		return h>=0 ? dn2_native::builtin::names(h,p,names) : um::native_names(id,p,names);
+	}
+};
 // A Rytm running the mods (any F0 7D 52 54 from it) reports its voices itself (0021's 03 / 04, 0026's 33): the note
 // adapter (a stock Rytm's notes on channels 1..8 as PLAITS reports) then steps aside, or each MIDI note the Rytm
 // sends out over USB turned the voice it just set to JUNO / DSP SAMPLE / ... back into the adapter's PLAITS (the
@@ -115,12 +175,50 @@ static core::NoteAdapter s_Notes (ToCore);
 static volatile boolean s_bModded = FALSE;
 static void FromRytm (const u8 *pData, int nLength)
 {
+	if (s_nDn2Channel)
+	{
+		// UI reads never enter the audio event decoder or the Rytm report parser.
+		// One bounded reply, queued on core 3 and sent on core 0 after link controls.
+		if (nLength >= 6 && (pData[4] == 2 || pData[4] == 3) && pData[5] == 3)
+		{
+			if (s_Dn2Session.State () == dn2_native::Session<Dn2Endpoint>::Active)
+			{
+				const uint32_t state = __atomic_load_n (&g_nDn2Transport, __ATOMIC_ACQUIRE);
+				Dn2Catalog provider;
+				dn2_native::UiReply reply;
+				if ((state & 1u) && dn2_native::ui_answer (provider, pData, nLength,
+					s_Dn2Session.Token (), state >> 1, reply))
+				{
+					__atomic_store_n (&g_nDn2UiToken, s_Dn2Session.Token (), __ATOMIC_RELEASE);
+					g_Dn2UiOut.push (reply); // full: client retries, no blocking or partial reply
+				}
+			}
+			return;
+		}
+		if (s_Dn2Session.Receive (pData, nLength, Dn2NowMs ()))
+		{
+			dn2_native::Event event;
+			if (dn2_native::decode (pData, nLength, event) &&
+				(event.track == s_Dn2Session.Track () || (s_Dn2Session.Track () == 16 && event.track < 8)) &&
+				(event.flags & dn2_native::On) && !(event.flags & dn2_native::Kill)) {
+				s_nNotes++;
+				CObUsb::CaptureMarkNative (event.track);
+			}
+		}
+		return; // DN2 traffic never enters the Rytm firmware-report parser
+	}
 	if (nLength >= 5 && pData[1] == 0x7D && pData[2] == 0x52 && pData[3] == 0x54) s_bModded = TRUE;
 	s_Rx.on_sysex (TicksToUs (Ticks ()), pData, nLength);	// the arrival, before the handling below takes its time
 	ToCore (pData, nLength);
 }
 static void OnChannel (u8 s, u8 a, u8 b)
 {
+	if (s_nDn2Channel && !dn2_channel (s, a, b, s_nDn2Channel)) return;
+	if (s_nDn2Channel && s_Dn2Session.OwnsVoice ())
+	{
+		if (s == 0xB0 && a == 120) s_Notes.Channel (s, a, b); // explicit hard silence also clears sends
+		return; // no duplicate hits, CC overwrites, poly notes or trig-LFO updates
+	}
 	if ((s & 0xF0) == 0x90 && b) { s_nNotes++; s_nNoteChans |= 1u << (s & 0x0F); }
 	bridge::lfo_midi (s, a, b);		// the LFOs: a Rytm track's trig (an FX target's TRIG, core/lfo.h)
 	bridge::poly_midi (s, a, b);		// poly FM: the pads' notes, live chords (core/poly.h)
@@ -130,10 +228,24 @@ static void OnChannel (u8 s, u8 a, u8 b)
 // The Rytm's realtime bytes: the recorder's and STUTTER's (rec_pi::Transport), and MIDI's on USB-A (core/midim/midim.h)
 static void OnRealtime (uint8_t s, uint16_t spp)
 {
+	if (s_nDn2Channel && !s_Dn2Session.OwnsVoice () && s == 0xFC) s_Notes.Channel (0xB0, 123, 0);
 	rec_pi::Transport (s, spp);
 	bridge::midim_realtime (s);
 }
 static MidiIn s_Midi (FromRytm, OnChannel, OnRealtime);
+void CEngineCores::ConfigureDn2 (unsigned nChannel, boolean bAutoNative)
+{
+	s_nDn2Channel = nChannel >= 1 && nChannel <= 16 ? nChannel : 0;
+	if (s_nDn2Channel) s_bNotes = TRUE, s_bModded = FALSE;
+	if (s_nDn2Channel && bAutoNative)
+	{
+		// Record intent before the control core starts. Poll performs the usual
+		// handshake once USB is ready; no voice is claimed before matching ACK/RESET.
+		s_Dn2Session.Configure (16, Dn2NowMs (), 1);
+		CLogger::Get ()->Write (From, LogNotice, "DN2 auto-start: tracks 1..8, native returns; waiting for host handshake");
+	}
+	s_Midi.ResetStream ();
+}
 // The Pi's own keyboards' notes for the Rytm (core/keys.h: an analog track's, a forwarded one's): one USB MIDI event
 // packet each into g_KeysToRytm (core 0's transport sends them between whole messages); a full queue drops it
 static volatile unsigned s_nKeysLost;
@@ -422,6 +534,7 @@ static void Drone (void)
 	for (int v = 0; v < 8; v++)
 	{
 		if (s_nDrone != 8 && s_nDrone != v) continue;
+		if (unsigned(v) < s_Dn2Endpoint.parts && s_nDn2Channel && s_Dn2Session.OwnsVoice ()) continue;
 		s_Notes.Channel (0x80 | v, 48 + 2 * v, 0);
 		s_Notes.Channel (0x90 | v, 48 + 2 * v, 100);
 	}
@@ -491,10 +604,26 @@ void CEngineCores::Control (void)
 		u64 tS = t0;
 		auto Mark = [&] (unsigned i) { u64 t = Ticks (); nSec[i] = (unsigned) ((t - tS) * 1000000 / TickRate ()); tS = t; crumb::Enter (101 + i); };
 		boolean bWorked = FALSE;
+		if (s_nDn2Channel && g_bRytmGone)
+		{
+			g_bRytmGone = false;
+			u8 stale;
+			while (g_MidiIn.pop (&stale)) {}
+			s_Midi.ResetStream ();
+			s_Dn2Session.Disconnect ();
+			s_Notes.Channel (0xB0, 120, 0);
+			bridge::rytm_gone ();
+		}
+		if (s_nDn2Channel)
+		{
+			uint32_t state = __atomic_load_n (&g_nDn2Transport, __ATOMIC_ACQUIRE);
+			s_Dn2Session.Poll (Dn2NowMs (), (state & 1u) != 0, state >> 1);
+			bridge::dn2_native_poll ();
+		}
 		u8 b;
 		while (g_MidiIn.pop (&b))
 		{
-			bridge::rytm_byte (b);	// the Rytm pattern dump's reader first (core/seq/rytm_dump.h): its answer outgrows MidiIn
+			if (!s_nDn2Channel) bridge::rytm_byte (b); // DN2 MIDI never enters the Rytm dump parser
 			s_Midi.Feed (b);
 			s_nMidiBytes++;
 			bWorked = TRUE;
@@ -598,11 +727,37 @@ void CEngineCores::Control (void)
 void CEngineCores::Command (const char *p)
 {
 	CLogger *L = CLogger::Get ();
-	if (strncmp (p, "notemach=", 9) == 0 && p[9] >= '0' && p[9] <= '7' && p[10] == ':')
+	if (strcmp (p, "dn2native") == 0 || strncmp (p, "dn2native=", 10) == 0)
+	{
+		if (!s_nDn2Channel) { L->Write (From, LogWarning, "native DN2 control requires the DN2 profile"); return; }
+		if (p[9])
+		{
+			const char *value = p + 10;
+			int track = strcmp (value, "off") == 0 ? -1 : -2;
+			if (strcmp (value, "all") == 0) track = 16;
+			if (value[0] >= '1' && value[0] <= '9' && !value[1]) track = value[0] - '1';
+			else if (value[0] == '1' && value[1] >= '0' && value[1] <= '6' && !value[2]) track = 9 + value[1] - '0';
+			if (!s_Dn2Session.Configure (track, (uint32_t) Ticks (), s_Dn2Session.Returns ()))
+			{ L->Write (From, LogWarning, "use dn2native=all, dn2native=1..16 or dn2native=off"); return; }
+		}
+		const char *states[] = {"idle", "waiting for ACK", "waiting for RESET", "active"};
+		if (s_Dn2Session.Track () == 16)
+			L->Write (From, LogNotice, "DN2 native: tracks 1..8, %s (stock MIDI until acknowledged)", states[s_Dn2Session.State ()]);
+		else L->Write (From, LogNotice, "DN2 native: track %d, %s (stock MIDI until acknowledged)",
+			s_Dn2Session.Track () + 1, states[s_Dn2Session.State ()]);
+	}
+	else if (strcmp (p, "dn2returns=native") == 0 || strcmp (p, "dn2returns=stereo") == 0)
+	{
+		if (!s_nDn2Channel) { L->Write (From, LogWarning, "DN2 profile required"); return; }
+		const uint8_t mode = strcmp (p + 11, "native") == 0 ? 1 : 0;
+		s_Dn2Session.Configure (s_Dn2Session.Track (), (uint32_t) Ticks (), mode);
+		L->Write (From, LogNotice, "DN2 return mode %s requested; waiting for matching firmware ACK", mode ? "native" : "stereo");
+	}
+	else if (strncmp (p, "notemach=", 9) == 0 && p[9] >= '0' && p[9] <= '7' && p[10] == ':')
 	{
 		int v = p[9] - '0';
 		if (s_Notes.SetMachine (v, p + 11)) L->Write (From, LogNotice, "notes: voice %d plays %s", v, p + 11);
-		else L->Write (From, LogWarning, "notes: no machine \"%s\" (plaits juno daisy dsps fm md)", p + 11);
+		else L->Write (From, LogWarning, "notes: unknown or unready machine \"%s\" (%s)", p + 11, core::NoteAdapter::Names ());
 	}
 	else if (strncmp (p, "drone=", 6) == 0)
 	{

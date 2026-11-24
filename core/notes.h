@@ -15,17 +15,22 @@ namespace core {
 class NoteAdapter {
  public:
   typedef void (*SysExFn)(const uint8_t* d, int len);
-  explicit NoteAdapter(SysExFn out);
-  bool SetMachine(int voice, const char* name);   // plaits juno daisy dsps grain fm md; false: unknown name or voice
+  // Control-side cached metadata only; false when the slot is not ready.
+  typedef bool (*UserDefaultsFn)(int slot, uint8_t values[16]);
+  explicit NoteAdapter(SysExFn out, UserDefaultsFn user_defaults = nullptr);
+  bool SetMachine(int voice, const char* name);   // Names(); u1..u5 require a ready user slot
   int Machine(int voice) const { return mach_[voice & 7]; }
   static const char* Name(int flag);
   static const char* Names();   // the names SetMachine knows, space-separated
   void Channel(uint8_t status, uint8_t d1, uint8_t d2);
+  void SuspendVoice(int voice);  // kill only this voice; retain stock controls, forget its held note
+  void RestoreVoice(int voice);  // restore retained controls without retriggering
 
  private:
   void Defaults(int voice);
   void Send(int cmd, int voice, int note, int vel);
   SysExFn out_;
+  UserDefaultsFn user_defaults_;
   uint8_t mach_[8];
   uint8_t p_[8][16];
   int8_t last_[8];   // the note sounding on each voice, -1 none

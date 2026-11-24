@@ -2,6 +2,7 @@
 // report does to a voice, one block of each voice's audio, DSP SAMPLE's card work between requests. Module state,
 // one engine per program, as before. Voice handling is sim/obhost.py's (sim/protocol.py's docstring).
 #pragma once
+#include "voice_gain.h"
 #include "platform.h"   // first: the Teensy port defines PROGMEM, which puts JUNO's factory table (juno_patches.h) in flash
 
 #include <DaisySP.h>
@@ -141,6 +142,14 @@ extern uint32_t ram_late;             // trigs of a RAM-only mode whose sample c
 void voices_init();
 // A 0x04 / 0x03 report (d: the whole F0..F7, len bytes) and a 0x11 note-off.
 void voice_report(int cmd, const uint8_t* d, int len);
+// Native external-host controls, control core between blocks. Keeps all fraction
+// bits before UI/modulation/plugin processing; level is separate from plugin P8.
+bool voice_user_params(int vi, int slot, const float params[16], float level);
+// Built-in native host path: standard engine controls, no Rytm knob-sync protocol.
+bool voice_builtin_params(int vi, unsigned machine, const float params[16], float level);
+bool voice_builtin_on(int vi, float note, float velocity);
+// Cached library/ROM names only; no preset load, file access or voice mutation.
+void voice_preset_name(unsigned machine, unsigned preset, char* out, unsigned capacity);
 // polyuser-4 F-b1: a 33 names voice vi's Sidecar machine (vb): the voice takes it while no 0x03 / 0x04 has come yet
 void voice_machine_hint(int vi, uint8_t vb);
 void voice_reports_forget();   // a new link (the Rytm restarted): the next 33 names the machines again
@@ -177,7 +186,7 @@ enum { kMFm, kMJuno, kMDsps, kMDaisy, kMMd, kMPlaits, kMUser, kMachines };
 // the knee too. The other engines stay under it and keep their levels against each other. Hotter than the defaults (STRING at DMP 0: -11.8, LEV 127,
 // PLAITS VOL 127) the knee rounds the peaks toward -12 dBFS, never a hard clip. The rows are requantised (Q15,
 // rounded, no dither): a quiet engine keeps 1.5 bits fewer above the int16 floor.
-constexpr float kVoiceGain = 0.35f;
+// kVoiceGain is shared with the independent DN2 return codec in voice_gain.h.
 uint32_t render_voices(int16_t (*ring)[kVoices], int ring_len, int w, int v0, int v1, uint64_t* mach,
                        int16_t (*ring_r)[kVoices] = nullptr, uint8_t* st = nullptr);
 // DSP SAMPLE's DEC on PRE / POST (core/fx/out.h): its trig / note-off counters (the control core bumps, the render

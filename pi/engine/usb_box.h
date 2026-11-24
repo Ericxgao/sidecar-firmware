@@ -12,8 +12,13 @@ enum TUsbBox {
   UsbBoxHello,      // an Analog Four MKII: nothing goes to it, its hello is heard (hello_gate.h); once it is the box in use, the host link
 };
 
-inline TUsbBox usb_box(const char* vendor, const char* product) {
+inline TUsbBox usb_box(const char* vendor, const char* product, bool dn2 = false) {
   bool has_v = vendor != 0 && *vendor != 0, has_p = product != 0 && *product != 0;
+  const char* model = has_p ? strstr(product, "Digitone II") : nullptr;
+  constexpr unsigned model_len = sizeof("Digitone II") - 1;
+  if (model && (model[model_len] == 0 || model[model_len] == ' ')) return dn2 ? UsbBoxHost : UsbBoxOther;
+  if (dn2) return (has_v && strstr(vendor, "Elektron")) || !has_p || strstr(product, "Elektron")
+                     ? UsbBoxOther : UsbBoxKeyboard;
   if (!has_v && !has_p) return UsbBoxHost;   // a device without strings: taken for the Rytm, as ever
   if (has_p && strstr(product, "Rytm") != 0) return UsbBoxHost;
   if (has_p && strstr(product, "Digitakt") != 0 && strstr(product, "Digitakt II") == 0) return UsbBoxHost;

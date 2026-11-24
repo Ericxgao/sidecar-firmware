@@ -39,7 +39,7 @@ const Mach kMachs[] = {
 const int kN = sizeof kMachs / sizeof kMachs[0];
 }  // namespace
 
-CORE_COLD NoteAdapter::NoteAdapter(SysExFn out) : out_(out) {
+CORE_COLD NoteAdapter::NoteAdapter(SysExFn out, UserDefaultsFn user_defaults) : out_(out), user_defaults_(user_defaults) {
   for (int v = 0; v < 8; ++v) {
     mach_[v] = 0x00;
     last_[v] = -1;
@@ -48,15 +48,26 @@ CORE_COLD NoteAdapter::NoteAdapter(SysExFn out) : out_(out) {
 }
 
 CORE_COLD const char* NoteAdapter::Name(int flag) {
+  static const char* const users[] = {"u1", "u2", "u3", "u4", "u5"};
+  if (flag >= 0x50 && flag <= 0x70 && !(flag & 7)) return users[(flag - 0x50) / 8];
   for (int k = 0; k < kN; ++k)
     if (kMachs[k].flag == flag) return kMachs[k].name;
   return "?";
 }
 
-CORE_COLD const char* NoteAdapter::Names() { return "plaits juno daisy dsps grain fm md wt gr livein chop"; }
+CORE_COLD const char* NoteAdapter::Names() { return "plaits juno daisy dsps grain fm md wt gr livein chop u1 u2 u3 u4 u5"; }
 
 CORE_COLD bool NoteAdapter::SetMachine(int voice, const char* name) {
   if (voice < 0 || voice > 7) return false;
+  if (name && name[0] == 'u' && name[1] >= '1' && name[1] <= '5' && !name[2]) {
+    uint8_t values[16] = {};
+    const int slot = name[1] - '1';
+    if (!user_defaults_ || !user_defaults_(slot, values)) return false;
+    mach_[voice] = (uint8_t)(0x50 + slot * 8);
+    memcpy(p_[voice], values, sizeof values);
+    return true;
+  }
+  if (!name) return false;
   for (int k = 0; k < kN; ++k)
     if (!strcmp(kMachs[k].name, name)) {
       mach_[voice] = kMachs[k].flag;
@@ -119,6 +130,18 @@ CORE_COLD void NoteAdapter::Channel(uint8_t status, uint8_t d1, uint8_t d2) {
     p_[ch][d1 - 16] = d2 & 0x7F;
     Send(0x03, ch, 0, 0);
   }
+}
+
+CORE_COLD void NoteAdapter::SuspendVoice(int voice) {
+  if (voice < 0 || voice > 7) return;
+  last_[voice] = -1;
+  voice_silence(voice);
+}
+
+CORE_COLD void NoteAdapter::RestoreVoice(int voice) {
+  if (voice < 0 || voice > 7) return;
+  last_[voice] = -1;
+  Send(0x03, voice, 0, 0);
 }
 
 }  // namespace core

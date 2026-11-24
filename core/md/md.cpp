@@ -55,6 +55,10 @@ void copy_text(char* d, const char* s, int n) {   // n chars at most, NUL-padded
 }  // namespace
 
 CORE_COLD uint32_t state_bytes() { return mdk_builtin_entry.state_bytes; }
+CORE_COLD bool control_info(int set,int k,const char** name,const char** short_name,int* value) {
+  if(set<0 || set>=kSets || k<0 || k>=mdk_builtin_controls(set)) return false;
+  *name=mdt_label[set][k][0];*short_name=mdt_label[set][k][1];*value=mdk_builtin_default(set,k);return true;
+}
 
 CORE_COLD void enter(int vi) {
   if (!g_ok || vi < 0 || vi >= kVoices) return;

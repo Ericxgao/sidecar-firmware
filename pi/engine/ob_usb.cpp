@@ -1,6 +1,7 @@
 //
 // ob_usb.cpp - Rytm MKII Overbridge host for Circle (Raspberry Pi 4, xHCI/VL805), and any box whose device profile has an
-// audio row: only the block size of OUT and its channel count differ (IN is 12 channels for every box so far).
+// audio row: channel counts, block sizes and packing follow the profile. Input
+// consumers receive the classic 12-channel layout after device normalization.
 //
 // What it does:
 //   1. logs the whole configuration descriptor (interfaces, alternate settings, endpoints);
@@ -66,14 +67,16 @@
 #include "rec_pi.h"
 #include "bridge.h"
 #include "device/device.h"
+#include "device/dn2_audio.h"
+#include "device/dn2.h"
 #include "fx/out_measure.h"		// stereo=measure's read-back (MAIN L/R)
 #include "samp/preview.h"		// the sample browser's preview (POST)
 #include "shared.h"
 
 static const char From[] = "rytmob";
 
-static const unsigned kBlk = ob::block_bytes (ob::kChannels);			// 368, the biggest block either way
-static const unsigned kBufSize = (CObUsb::MaxBlocks * kBlk + 63) & ~63u;	// 2944
+static const unsigned kBlk = ob::block_bytes (ob::kChannels); // normalized consumer block
+static const unsigned kBufSize = (CObUsb::MaxBlocks * sidecar::dn2::kFromBlockBytes + 63) & ~63u;
 
 static_assert (CObUsb::MaxURBs <= XHCI_EP_MAX_URBS, "Circle's per-endpoint URB FIFO");
 
@@ -112,6 +115,7 @@ static unsigned Clamp (unsigned v, unsigned lo, unsigned hi)
 
 CObUsb *CObUsb::s_pThis = 0;
 unsigned CObUsb::s_nGen = 0, CObUsb::s_nPipeResets = 0;
+unsigned CObUsb::s_nDn2Route = 0;
 static obspeed::Retry s_Retry;				// a box refused below high speed (ob_speed.h)
 static CUSBHCIRootPort *s_pRetryPort = 0;		// its root port: Circle's, it lives as long as the controller
 static CUSBStandardHub *s_pRetryHub = 0;		// or the Pi 4's VL805 hub (BuiltInHub), which lives as long too
@@ -127,6 +131,9 @@ volatile unsigned CObUsb::s_nCapOutPos = 0;
 unsigned CObUsb::s_nCapVoiceCh = CObUsb::CaptureMarkers;
 volatile boolean CObUsb::s_bCapOn = FALSE, CObUsb::s_bCapFull = FALSE;
 volatile unsigned CObUsb::s_nCapGaps = 0, CObUsb::s_nCapLost = 0;
+boolean CObUsb::s_bCapNative = FALSE;
+unsigned CObUsb::s_nCapPart = 0;
+unsigned CObUsb::s_nCapReference = 0;
 
 boolean CObUsb::CaptureAlloc (void)
 {
@@ -140,10 +147,10 @@ boolean CObUsb::CaptureAlloc (void)
 	return s_pCapBuf != 0;
 }
 
-boolean CObUsb::CaptureStart (boolean bSelfTest)
+boolean CObUsb::CaptureStart (boolean bSelfTest, unsigned nNativePart, unsigned nReferenceTrack)
 {
 	CObUsb *p = s_pThis;
-	if (s_pCapBuf == 0 || s_bCapOn) return FALSE;
+	if (s_pCapBuf == 0 || s_bCapOn || nNativePart >= 8 || nReferenceTrack > 16) return FALSE;
 	if (!bSelfTest && (p == 0 || !p->m_bStreaming)) return FALSE;
 
 	for (unsigned i = 0; i < CaptureFrames; i++) s_pCapBuf[i * CaptureChannels + 3] = 0;	// markers
@@ -152,8 +159,11 @@ boolean CObUsb::CaptureStart (boolean bSelfTest)
 	s_nCapPos = 0;
 	// OUT starts where IN does: the OUT blocks are filled in the IN completion (paced)
 	s_nCapOutPos = 0;
+	s_nCapPart = nNativePart;
+	s_nCapReference = nReferenceTrack;
 	s_nCapGaps = 0;
 	s_nCapLost = 0;
+	s_bCapNative = p && p->m_pAudio && p->m_pAudio->wire == core::out::kObDn2 && (Dn2ReturnState () & 0x100u);
 	s_bCapFull = FALSE;
 	s_bCapOn = TRUE;		// from the next IN block on
 	LeaveCritical ();
@@ -163,10 +173,19 @@ boolean CObUsb::CaptureStart (boolean bSelfTest)
 // IRQ (the MIDI completion): a note-on arrived; marks the next IN frame of the capture
 void CObUsb::CaptureMarkMIDI (void)
 {
+	if (s_bCapNative) return; // native SysEx events have their own accepted-event marker
 	if (s_bCapOn && s_pCapBuf != 0 && s_nCapVoiceCh >= (unsigned) ob::kChannels && s_nCapPos < CaptureFrames)
 	{
 		s_pCapBuf[s_nCapPos * CaptureChannels + 3] |= CaptureMarkerMIDI;
 	}
+}
+
+// Control core, after an accepted native ON for the measured part.
+void CObUsb::CaptureMarkNative (unsigned track)
+{
+	const unsigned pos = s_nCapPos;
+	if (track == s_nCapPart && s_bCapNative && s_bCapOn && s_pCapBuf && pos < CaptureFrames)
+		__atomic_fetch_or (&s_pCapBuf[pos * CaptureChannels + 3], CaptureMarkerMIDI, __ATOMIC_RELAXED);
 }
 
 void CObUsb::CaptureStop (void)
@@ -217,7 +236,7 @@ static CUSBStandardHub *BuiltInHub (CUSBDevice *pDevice)
 
 CUSBFunction *RytmObDeviceCreate (CUSBFunction *pParent)
 {
-	CUSBFunction *pFollow = CObFollow::Create (pParent);		// a4=1: an A4's stream beside the Rytm's (ob_follow.h)
+	CUSBFunction *pFollow = core::device::active ().id == core::device::kIdDn2 ? nullptr : CObFollow::Create (pParent);
 	if (pFollow != 0) return pFollow;
 	const TUSBDeviceDescriptor *pDesc = pParent->GetDevice ()->GetDeviceDescriptor ();
 	const core::device::Profile *p = core::device::by_usb (pDesc->idVendor, pDesc->idProduct);
@@ -230,7 +249,13 @@ CUSBFunction *RytmObDeviceCreate (CUSBFunction *pParent)
 		CLogger::Get ()->Write (From, LogWarning, "%s: a box already streams, no audio from this one", pAudio->name);
 		return 0;
 	}
-	if ((pAudio->in_channels != ob::kChannels && pAudio->in_channels != 8) || pAudio->channels < 2 || pAudio->channels > ob::kChannels)
+	const bool bDn2 = pAudio->wire == core::out::kObDn2;
+	const bool bValid = bDn2
+		? pAudio->in_channels == sidecar::dn2::kFromChannels && pAudio->channels == sidecar::dn2::kToChannels
+		  && pAudio->ret == core::out::kStereoMix && pAudio->post[0] == 0 && pAudio->post[1] == 1
+		: pAudio->wire == core::out::kObClassic && (pAudio->in_channels == ob::kChannels || pAudio->in_channels == 8)
+		  && pAudio->channels >= 2 && pAudio->channels <= ob::kChannels;
+	if (!bValid)
 	{
 		CLogger::Get ()->Write (From, LogError, "%s: %u channels in, %u out: not a stream this driver serves", pAudio->name,
 					(unsigned) pAudio->in_channels, (unsigned) pAudio->channels);
@@ -404,8 +429,10 @@ void CObUsb::SetActive (boolean bActive)
 
 CObUsb::CObUsb (CUSBFunction *pFunction, const core::out::Device *pAudio)
 :	CUSBFunction (pFunction),
-	m_pAudio (pAudio), m_nOutCh (pAudio->channels), m_nOutBlk (ob::block_bytes (pAudio->channels)),
-	m_nInCh (pAudio->in_channels), m_nInBlk (ob::block_bytes (pAudio->in_channels)),
+	m_pAudio (pAudio), m_nOutCh (pAudio->channels),
+	m_nOutBlk (pAudio->wire == core::out::kObDn2 ? sidecar::dn2::kToBlockBytes : ob::block_bytes (pAudio->channels)),
+	m_nInCh (pAudio->in_channels),
+	m_nInBlk (pAudio->wire == core::out::kObDn2 ? sidecar::dn2::kFromBlockBytes : ob::block_bytes (pAudio->in_channels)),
 	m_pInDesc (0), m_pOutDesc (0), m_pIn (0), m_pOut (0),
 	m_pInURB {}, m_pOutURB {}, m_bInBusy {}, m_bOutBusy {},
 	m_nInPending (0), m_nOutPending (0), m_bStreaming (FALSE),
@@ -687,6 +714,8 @@ void CObUsb::MirrorWanted (void)
 // Configure (task level): the box's descriptors to the gadget, its string descriptors read once, its pipes opened
 void CObUsb::MirrorAttach (void)
 {
+	// The computer-facing mirror still assumes classic 32-bit channel words.
+	if (m_pAudio->wire != core::out::kObClassic) return;
 	CSidecarGadget *pGadget = CSidecarGadget::Get ();
 	const TUSBDeviceDescriptor *pDev = GetDevice ()->GetDeviceDescriptor ();
 	const TUSBConfigurationDescriptor *pCfg = GetDevice ()->GetConfigurationDescriptor ();
@@ -972,10 +1001,17 @@ void CObUsb::FillOut (u8 *pBuf, unsigned nBlocks)
 {
 	for (unsigned b = 0; b < nBlocks; b++)
 	{
+		const unsigned route = m_pAudio->wire == core::out::kObDn2 ? Dn2ReturnState () : 0;
+		if (route != m_nDn2Route) {
+			// Consumer-side flush: queued samples belong to the previous mode.
+			g_Output.Reset ();
+			m_nDn2Route = route;
+		}
 		u8 *pBlock = pBuf + b * m_nOutBlk;
 		ob::write_header (pBlock, m_nOutCounter);
 #ifdef CIRCLE_GADGET_MIRROR
-		if (CSidecarGadget::Get () != 0) CSidecarGadget::Get ()->MirrorOutExtra (pBlock, m_nOutCounter);	// usb=mirror
+		if (m_pAudio->wire == core::out::kObClassic && CSidecarGadget::Get () != 0)
+			CSidecarGadget::Get ()->MirrorOutExtra (pBlock, m_nOutCounter);	// usb=mirror
 #endif
 		m_nOutCounter += ob::kFramesPerBlock;
 
@@ -995,7 +1031,7 @@ void CObUsb::FillOut (u8 *pBuf, unsigned nBlocks)
 			memset (FD, 0, sizeof FD);
 			memset (PR, 0, sizeof PR);
 		}
-		if (CSidecarGadget::Get () != 0)		// the computer's OUT added (UAC2 OUT 1-12), the voices kept
+		if (!route && CSidecarGadget::Get () != 0)		// native lanes contain engine voices only
 			CSidecarGadget::Get ()->ToRytm (F, V, ob::kFramesPerBlock, FALSE);
 		float X[ob::kFramesPerBlock][4] = {};		// each FX's own return (the recorder's FX1/FX2)
 		if (s_bActive) sendfx_pi::FromVoices (V, ob::kFramesPerBlock, FD);	// fx-ins: the voices' sends to the FX buses; PRE / POST voices' stems
@@ -1021,19 +1057,30 @@ void CObUsb::FillOut (u8 *pBuf, unsigned nBlocks)
 				float g = (float) s_nFadeLeft / FadeFrames;
 				if (s_nFadeLeft) s_nFadeLeft--;
 				for (int c = 0; c < ob::kChannels; c++) F[f][c] = (s32) (F[f][c] * g);
+				if (route & 0x100u)
+					for (int v = 0; v < ob::kVoices; v++) V[f][v] = (s16) (V[f][v] * g);
 			}
 #endif
-		for (int f = 0; f < ob::kFramesPerBlock; f++)
+		if (m_pAudio->wire == core::out::kObDn2)
 		{
-			core::simd::be32 (pBlock + ob::kHeaderBytes + 4 * m_nOutCh * f, F[f], m_nOutCh);
+			// Explicitly negotiated native mode bypasses the stereo/master path.
+			sidecar::dn2::Output D = {};
+			D.counter = (u16) (m_nOutCounter - ob::kFramesPerBlock);
+			if (route & 0x100u)
+				sidecar::dn2::mono_parts (&D, D.counter, V, (uint8_t) route);
+			else for (int f = 0; f < ob::kFramesPerBlock; f++)
+				D.samples[f][0] = F[f][0], D.samples[f][1] = F[f][1];
+			sidecar::dn2::encode (&D, pBlock, m_nOutBlk);
 		}
+		else for (int f = 0; f < ob::kFramesPerBlock; f++)
+			core::simd::be32 (pBlock + ob::kHeaderBytes + 4 * m_nOutCh * f, F[f], m_nOutCh);
 
 		if (s_bCapOn)
 		{
 			unsigned pos = s_nCapOutPos;
 			for (int f = 0; f < ob::kFramesPerBlock && pos < CaptureFrames; f++, pos++)
 			{
-				s_pCapBuf[pos * CaptureChannels + 2] = F[f][0];
+				s_pCapBuf[pos * CaptureChannels + 2] = s_bCapNative ? (s32) V[f][s_nCapPart] * 65536 : F[f][0];
 			}
 			s_nCapOutPos = pos;
 		}
@@ -1136,7 +1183,24 @@ void CObUsb::InDone (unsigned i, CUSBRequest *pURB)
 			const u8 *pBlk = pBuf + b * m_nInBlk;
 			if (!ob::block_from_device (pBlk)) { m_nInBadMagic++; continue; }
 			u8 Wide[kBlk];
-			if (m_nInCh != ob::kChannels)	// a box with 8 channels: the 12-channel block every consumer below takes
+			s32 Reference[ob::kFramesPerBlock]{};
+			if (m_pAudio->wire == core::out::kObDn2)
+			{
+				sidecar::dn2::Input D;
+				if (sidecar::dn2::decode (pBlk, m_nInBlk, &D) != sidecar::dn2::Result::Ok) { m_nInBadMagic++; continue; }
+				if (s_bCapOn && s_bCapNative && s_nCapReference) {
+					const unsigned ch = 2 * s_nCapReference;
+					for (int f = 0; f < ob::kFramesPerBlock; ++f)
+						Reference[f] = s32 ((int64_t (D.samples[f][ch]) + D.samples[f][ch + 1]) / 2);
+				}
+				s32 M[ob::kFramesPerBlock][ob::kChannels];
+				sidecar::dn2::monitor12 (D, M);
+				memcpy (Wide, pBlk, ob::kHeaderBytes);
+				for (int f = 0; f < ob::kFramesPerBlock; f++)
+					core::simd::be32 (Wide + ob::kHeaderBytes + 4 * ob::kChannels * f, M[f], ob::kChannels);
+				pBlk = Wide;
+			}
+			else if (m_nInCh != ob::kChannels)	// a box with 8 channels: the 12-channel block every consumer below takes
 			{
 				WidenIn (pBlk, Wide, m_nInCh);
 				pBlk = Wide;
@@ -1235,9 +1299,9 @@ void CObUsb::InDone (unsigned i, CUSBRequest *pURB)
 				s32 *pOut = s_pCapBuf + pos * CaptureChannels;
 				for (int f = 0; f < ob::kFramesPerBlock && pos < CaptureFrames; f++, pos++)
 				{
-					pOut[0] = ob::block_sample (pBlk, ob::kChannels, f, 0);
-					pOut[1] = ob::block_sample (pBlk, ob::kChannels, f, 1);
-					if (s_nCapVoiceCh < (unsigned) ob::kChannels)
+					pOut[0] = ob::block_sample (pBlk, ob::kChannels, f, s_bCapNative ? 2 + s_nCapPart : 0);
+					pOut[1] = s_bCapNative && s_nCapReference ? Reference[f] : ob::block_sample (pBlk, ob::kChannels, f, s_bCapNative ? 0 : 1);
+					if (!s_bCapNative && s_nCapVoiceCh < (unsigned) ob::kChannels)
 					{
 						pOut[3] = ob::block_sample (pBlk, ob::kChannels, f, s_nCapVoiceCh);
 					}
@@ -1437,6 +1501,15 @@ void CObUsbTransport::SetMIDI (CUSBMIDIDevice *pMIDI)
 				m_Merge.failed () ? " (sending was off after a failed send)" : "");
 	m_Merge.rytm_new ();				// a new umidi1 (or none): sending again when there is one
 	m_pMIDI = pMIDI;
+	if (core::device::active ().id == core::device::kIdDn2)
+	{
+		uint32_t state = __atomic_load_n (&g_nDn2Transport, __ATOMIC_RELAXED);
+		__atomic_store_n (&g_nDn2Transport, (state & ~1u) + 2u, __ATOMIC_RELEASE);
+		dn2_native::LinkRequest stale;
+		while (g_Dn2LinkOut.pop (&stale)) {}
+		dn2_native::UiReply ui;
+		while (g_Dn2UiOut.pop (&ui)) {}
+	}
 }
 
 // usbmidi_merge.h's Io on Circle: the endpoint (Circle's bulk Transfer blocks core 0's loop until the Rytm takes it,
@@ -1447,6 +1520,9 @@ struct TCircleIo : UsbMidiMerge::Io
 {
 	CUSBMIDIDevice *pMIDI;
 	CSidecarGadget *pSidecar;
+	bool dn2 = false;
+	uint32_t dn2_epoch = 0;
+	u8 dn2_packet[dn2_native::kUiReplyMax];
 	bool bFailed = false;				// a send failed in this Poll, first at nFailUs (EpBox: the MIDI OUT's error time)
 	unsigned nFailUs = 0;
 	unsigned nSendUs = 0;				// how long the last send () blocked (lagdiag.h TxDiag: the Rytm taking its input)
@@ -1460,13 +1536,41 @@ struct TCircleIo : UsbMidiMerge::Io
 	}
 	uint32_t last_send_us (void) override			{ return nSendUs; }
 	unsigned engine_pending (void) override			{ return g_ToHost.Waiting (); }
-	bool key (u32 *w) override				{ return g_KeysToRytm.pop (w); }
-	bool has_computer (void) override			{ return pSidecar != 0; }
+	bool key (u32 *w) override {
+		if (!dn2) return g_KeysToRytm.pop (w);
+		while (g_KeysToRytm.pop (w)) {} // preserve DN2's prohibition on ordinary host output
+		return false;
+	}
+	bool has_computer (void) override			{ return !dn2 && pSidecar != 0; }
 	void computer_connected (bool bUp) override		{ pSidecar->RytmMIDIConnected (bUp); }
 	bool computer (u32 *w) override				{ return pSidecar->ForRytm (w); }
-	bool computer_in_sysex (void) override			{ return pSidecar != 0 && pSidecar->ForRytmInSysEx (); }
-	const u8 *engine_next (int *pLen) override		{ return g_ToHost.Next (pLen); }
-	unsigned engine_drain (void) override			{ return g_ToHost.Drain (); }
+	bool computer_in_sysex (void) override			{ return !dn2 && pSidecar != 0 && pSidecar->ForRytmInSysEx (); }
+	const u8 *engine_next (int *pLen) override {
+		if (!dn2) return g_ToHost.Next (pLen);
+		g_ToHost.Drain ();
+		dn2_native::LinkRequest request;
+		while (g_Dn2LinkOut.pop (&request))
+			if (dn2_native::encode_request (request, dn2_epoch, dn2_packet, sizeof dn2_packet))
+			{
+				*pLen = dn2_native::kLinkBytes;
+				return dn2_packet;
+			}
+		dn2_native::UiReply ui;
+		while (g_Dn2UiOut.pop (&ui))
+			if (dn2_native::ui_reply_ok (ui, dn2_epoch, __atomic_load_n (&g_nDn2UiToken, __ATOMIC_ACQUIRE)))
+			{
+				memcpy (dn2_packet, ui.packet, ui.bytes);
+				*pLen = ui.bytes;
+				return dn2_packet;
+			}
+		return nullptr;
+	}
+	unsigned engine_drain (void) override {
+		unsigned dropped = g_ToHost.Drain ();
+		if (dn2) { dn2_native::LinkRequest request; while (g_Dn2LinkOut.pop (&request)) dropped += dn2_native::kLinkBytes; }
+		if (dn2) { dn2_native::UiReply ui; while (g_Dn2UiOut.pop (&ui)) dropped += ui.bytes; }
+		return dropped;
+	}
 	void warn (const char *p) override			{ CLogger::Get ()->Write (From, LogWarning, "%s", p); }
 };
 }
@@ -1475,10 +1579,18 @@ struct TCircleIo : UsbMidiMerge::Io
 void CObUsbTransport::Poll (void)
 {
 	TCircleIo Io;
+	Io.dn2 = core::device::active ().id == core::device::kIdDn2;
+	Io.dn2_epoch = __atomic_load_n (&g_nDn2Transport, __ATOMIC_ACQUIRE) >> 1;
 	Io.pMIDI = m_pMIDI;
 	Io.pSidecar = CSidecarGadget::Get ();
 	unsigned nNow = CTimer::GetClockTicks ();
-	m_Merge.poll (Io, m_pMIDI != 0, m_bSend, midibridge_pi::Queue (), midibridge_pi::Pace (), nNow);
+	if (Io.dn2)
+	{
+		if (Io.pSidecar) Io.pSidecar->RytmMIDIConnected (false);
+		if (auto *queue = midibridge_pi::Queue (); queue && queue->pending ()) queue->flush (false);
+	}
+	m_Merge.poll (Io, Io.pMIDI != 0, m_bSend || Io.dn2,
+		Io.dn2 ? nullptr : midibridge_pi::Queue (), Io.dn2 ? nullptr : midibridge_pi::Pace (), nNow);
 	unsigned nFail = m_Merge.failures () + m_Merge.mac_failed () + m_Merge.bridge_failed ();
 	if (m_Merge.msgs () != m_nMsgsSeen) m_nMsgsSeen = m_Merge.msgs (), m_nMidiInRow = 0;	// a good send: the run ends
 	// a send failed (its message dropped, counted): a halted endpoint is reset, one reset a main-loop pass in all
@@ -1524,7 +1636,14 @@ void CObUsbTransport::Poll (void)
 		if (Io.pSidecar != 0) Io.pSidecar->ComputerSendFailed ();
 	}
 	midibridge_pi::SetRytmFail (m_Merge.bridge_failed ());
-	boolean bSending = m_pMIDI != 0 && m_bSend && !m_Merge.failed ();
+	boolean bSending = m_pMIDI != 0 && (m_bSend || Io.dn2) && !m_Merge.failed ();
+	if (Io.dn2)
+	{
+		// Even an immediately recovered failed send invalidates the old session.
+		// Core 3 must see that discontinuity, not just a transient unavailable bit.
+		if (Io.bFailed) ++Io.dn2_epoch;
+		__atomic_store_n (&g_nDn2Transport, (Io.dn2_epoch << 1) | (bSending ? 1u : 0u), __ATOMIC_RELEASE);
+	}
 	g_bRytmOff = !bSending;
 	if (m_Resync.tick (m_Merge.dropped () + g_nToHostFull + bridge::to_host_dropped (), bSending, nNow))
 		g_bRytmResync = true;

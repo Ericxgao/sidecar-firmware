@@ -141,6 +141,9 @@ void reset();                          // back to the Rytm and /.rytm, as a fres
 uint32_t dropped();                    // messages from the box not translated, and messages to it filtered
 
 void boot();                           // engine_begin, before anything else reads the card: the last box and its folder
+// Explicit experimental boot selection: registered profile, before boot() only.
+// Does not rewrite the remembered device. Pins audio/state until the next boot.
+bool boot_as(uint16_t id);
 bool leaving();                        // a change of folder waits: the idle saves flush, not settle
 // The idle saves' tail: a change of folder once settled (all saved), and a restart only when the choice is on the card; true if it did work
 bool step(bool settled = true);

@@ -3,6 +3,8 @@
 #include "output.h"
 #include "records.h"
 #include "spsc.h"
+#include "dn2_transport.h"
+#include "dn2_ui_wire.h"
 #include <deque>
 #include <vector>
 struct TToHostStub {   // the engine's records for the Rytm, as the test queues them
@@ -23,3 +25,7 @@ inline Spsc<uint32_t, 512> g_KeysToRytm;
 inline unsigned g_nToHostFull;
 inline volatile bool g_bRytmResync;
 inline volatile bool g_bRytmOff;
+inline Spsc<dn2_native::LinkRequest, 4> g_Dn2LinkOut;
+inline Spsc<dn2_native::UiReply, 2> g_Dn2UiOut;
+inline uint32_t g_nDn2UiToken;
+inline uint32_t g_nDn2Transport;

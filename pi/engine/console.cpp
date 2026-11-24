@@ -128,6 +128,7 @@ void CConsole::Poll (void)
 			else
 			{
 				m_nCaptureStart = CTimer::Get ()->GetTicks ();
+				m_bRamCapture = FALSE;
 				L->Write (From, LogNotice, "capture: started, %u s at %u Hz", CObUsb::CaptureSecs, CObUsb::CaptureRate);
 			}
 		}
@@ -142,9 +143,10 @@ void CConsole::Poll (void)
 	if (CObUsb::CaptureFull () && !m_bDumping)
 	{
 		CObUsb::CaptureClearFull ();
-		L->Write (From, LogNotice, "capture: done, %u gaps (%u blocks lost); dumping", CObUsb::CaptureGaps (),
+		L->Write (From, LogNotice, "capture: done, %u gaps (%u blocks lost)", CObUsb::CaptureGaps (),
 			  CObUsb::CaptureLost ());
-		StartDump ();
+		if (m_bRamCapture) L->Write (From, LogNotice, "capture: RAM ready for /capture/data");
+		else StartDump ();
 	}
 	if (m_bDumping && DumpStep ())
 	{
@@ -158,6 +160,32 @@ void CConsole::Poll (void)
 void CConsole::Command (const char *pText)
 {
 	CLogger *L = CLogger::Get ();
+	if (strncmp (pText, "capture=ram", 11) == 0) {
+		unsigned part = 0, reference = 0;
+		const char *p = pText + 11;
+		if (*p) {
+			if (*p++ != ':' || *p < '1' || *p > '8') {
+				L->Write (From, LogWarning, "capture: use capture=ram[:part[:reference]]"); return;
+			}
+			part = unsigned (*p++ - '1');
+			if (*p == ':') {
+				++p;
+				if (*p >= '0' && *p <= '9') reference = unsigned (*p++ - '0');
+				if (*p >= '0' && *p <= '9') reference = reference * 10 + unsigned (*p++ - '0');
+				if (!reference || reference > 16) {
+					L->Write (From, LogWarning, "capture: reference track must be 1..16"); return;
+				}
+			}
+			if (*p) { L->Write (From, LogWarning, "capture: invalid arguments"); return; }
+		}
+		if (m_bDumping || !CObUsb::CaptureStart (FALSE, part, reference)) {
+			L->Write (From, LogWarning, "capture: busy or no stream"); return;
+		}
+		m_bRamCapture = TRUE;
+		m_nCaptureStart = CTimer::Get ()->GetTicks ();
+		L->Write (From, LogNotice, "capture: RAM started (10 s, no SD writes)");
+		return;
+	}
 	if (CWifi::Get () != 0 && CWifi::Get ()->Command (pText)) return;	// core 0's (wifi.h): before the length check, join is long
 	if (rec_pi::Command (pText)) return;				// core 0's (rec_pi.h): rec=ch: lists are long too
 	if (stor_pi::Command (pText)) return;				// core 0's (stor_pi.h): the volumes, the bench

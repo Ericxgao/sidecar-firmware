@@ -28,6 +28,7 @@
 #include "usbnet_pi.h"		// the USB-C cable is trusted (docs/usb-network.md)
 #include "update_pi.h"		// the firmware update from this page (update.h, docs/web-update.md)
 #include "blackbox_pi.h"
+#include "ob_usb.h"
 #include "midibridge_pi.h"
 #include "sidecar_gadget.h"	// usbmidi=os: /cmd refuses link=tcp:<address> while it is on
 #include "wifi_conf.h"
@@ -858,6 +859,38 @@ THTTPStatus CWebServer::GetContent (const char *pPath, const char *pParams, cons
 		memcpy (pBuffer, (const char *) s, n);
 		*pLength = n;
 		*ppContentType = "application/json";
+	}
+	else if (strcmp (pPath, "/capture/status") == 0 || strcmp (pPath, "/capture/data") == 0)
+	{
+		// Diagnostic capture is pairing-gated and read only. Never stream a buffer
+		// while the audio producer is filling it; transfer only after capture ends.
+		if (!FromPage (m_pNet, GetRequestHost (), GetRequestOrigin (), GetRequestReferer (), TRUE)) {
+			WifiReply ("capture: same-origin required", 403, pBuffer, pLength, ppContentType); return HTTPOK;
+		}
+		unsigned frames = CObUsb::CaptureFramesDone (), out = CObUsb::CaptureOutFramesDone ();
+		unsigned valid = frames < out ? frames : out;
+		if (strcmp (pPath, "/capture/status") == 0) {
+			CString s;
+			s.Format ("{\"active\":%u,\"native\":%u,\"frames\":%u,\"outFrames\":%u,\"bytes\":%u,\"gaps\":%u,\"lost\":%u,\"track\":%u,\"referenceTrack\":%u}",
+				CObUsb::CaptureActive (), CObUsb::CaptureNative (), frames, out, valid * 16,
+				CObUsb::CaptureGaps (), CObUsb::CaptureLost (), CObUsb::CapturePart () + 1, CObUsb::CaptureReference ());
+			if (s.GetLength () > *pLength) return HTTPInternalServerError;
+			memcpy (pBuffer, (const char *) s, s.GetLength ()); *pLength = s.GetLength ();
+			*ppContentType = "application/json\r\nCache-Control: no-store";
+		} else {
+			if (CObUsb::CaptureActive () || !CObUsb::CaptureData ()) {
+				WifiReply ("capture: not ready", 409, pBuffer, pLength, ppContentType); return HTTPOK;
+			}
+			char num[24];
+			u64 off = FormValue (pParams, "off", num, sizeof num) ? ParseU64 (num) : 0;
+			u64 len = FormValue (pParams, "len", num, sizeof num) ? ParseU64 (num) : 49152;
+			u64 bytes = (u64) valid * 16;
+			if (off > bytes) { WifiReply ("capture: bad offset", 400, pBuffer, pLength, ppContentType); return HTTPOK; }
+			if (len > bytes - off) len = bytes - off;
+			if (len > *pLength) len = *pLength;
+			memcpy (pBuffer, CObUsb::CaptureData () + (unsigned) off, (unsigned) len); *pLength = (unsigned) len;
+			*ppContentType = "application/octet-stream\r\nCache-Control: no-store";
+		}
 	}
 	else if (strcmp (pPath, "/blackbox") == 0)	// the black box's file (blackbox_pi.h; not in the open set: paired only)
 	{

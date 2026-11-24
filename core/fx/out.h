@@ -58,6 +58,7 @@ constexpr float kSmoothMs = 3.0f;    // LEV / PAN / WID smoothing
 // not have is kNoChannel. in_channels: device -> host channels a frame (the driver widens 8 to the 12 its consumers take: core/device/a4.cpp).
 constexpr uint8_t kNoChannel = 0xFF;
 enum Return : uint8_t { kPerVoice = 0, kStereoMix = 1 };
+enum Wire : uint8_t { kObClassic = 0, kObDn2 = 1 };
 struct Device {
   const char* name;
   uint8_t channels;          // host -> device channels a frame
@@ -69,6 +70,7 @@ struct Device {
   uint16_t loop_frames;      // host -> device -> host, frames (0: not measured)
   uint8_t in_channels;       // device -> host channels a frame
   Return ret;                // per voice, or one stereo mix
+  Wire wire = kObClassic;     // sample packing and USB block sizes, independent of the mix layout
 };
 // the Rytm: voices BD BT SD LT CH/OH MT/HT CY/CB RS/CP (core/ui/remote.cpp kTrackVoice), channels 4..11 / stems
 // IN 2..9 in the order BD SD RS/CP BT LT MT/HT CH/OH CY/CB, tracks BD SD RS CP BT LT MT HT CH OH CY CB; AUDIO IN L / R on

@@ -13,6 +13,9 @@
 #include "mod/scene.h"
 #include "mod/xypad.h"
 #include "device/device.h"
+#include "device/dn2.h"
+#include "dn2_parts.h"
+#include "dn2_builtins.h"
 #include "fx/insert.h"
 #include "fx/master.h"
 #include "fx/out.h"
@@ -43,6 +46,7 @@
 #include "samp/sampler.h"
 #include "slots.h"
 #include "user/um.h"   // the guard key: a user plugin's load (machine_gen)
+#include "user/native_catalog.h"
 #include "ui/extra.h"
 #include "ui/remote.h"
 #include "spsc.h"   // the remote UI's hand-off from core 0 (rui_status, rui_popup)
@@ -52,6 +56,88 @@
 #endif
 
 namespace bridge {
+
+void dn2_builtin_descriptor(int h,int track,unsigned selector,um::NativeDescriptor& d) {
+		dn2_native::builtin::descriptor(h,d);
+		if(track<0 || track>=8 || selector>127)return; // Legacy clients keep the original static descriptors.
+		if(h==dn2_native::builtin::First+4) {
+			int set=int(selector)*30/128;
+			for(int i=0;i<8;++i) {
+				const char *name=nullptr,*short_name=nullptr;int value=0;
+				auto& k=d.desc.knob[i];
+				bool exists=core::md::control_info(set,i,&name,&short_name,&value);
+				dn2_native::builtin::text(k.long_name,sizeof k.long_name,name);
+				dn2_native::builtin::text(k.short_name,sizeof k.short_name,short_name);
+				// Defaults only apply on an explicit new-machine selection.
+				k.def=uint8_t(value);k.max=exists?127:0;
+			}
+		} else if(h==dn2_native::builtin::First+1 || h==dn2_native::builtin::First+3) {
+			core::voice_preset_name(dn2_native::builtin::get(h)->flag,selector,d.desc.p2_title,sizeof d.desc.p2_title);
+			d.flags|=RMP_FLAG_PRESETS;
+		}
+		d.revision=rmp_meta_print(d.state,d.flags,dn2_native::builtin::get(h)->id,0x10001,&d.desc)^uint32_t(track+1)*0x9e3779b9u^selector;
+}
+
+namespace {
+// A separate plugin instance and owner for each DN2 part. Control core only.
+struct Dn2Sink {
+  bool valid[dn2_native::kParts]{};
+  int handles[dn2_native::kParts]{};
+  bool native_returns = false;
+  unsigned param_failures = 0, note_failures = 0;
+  int bad_param = -1;
+  float bad_value = 0, last_level = 0;
+  float part_params[dn2_native::kParts][16]{}, part_note[dn2_native::kParts]{}, part_velocity[dn2_native::kParts]{};
+  int Ready(const char* id) { int h=dn2_native::builtin::find(id);return h>=0?h:um::ready_slot(id); }
+  uint32_t Epoch(int slot) { return dn2_native::builtin::get(slot)?1:um::slot_epoch(slot); }
+  void Params(unsigned part, int slot, const float* p, float level) {
+    memcpy(part_params[part], p, sizeof part_params[part]);
+    last_level = level;
+    handles[part]=slot;
+    const auto* builtin=dn2_native::builtin::get(slot);
+    if(builtin) {
+      bool sane=level>=0 && level<=1;
+      for(int i=0;i<16;++i) sane=sane && p[i]>=0 && p[i]<128;
+      float controls[16]{};
+      if(sane) dn2_native::builtin::controls(slot,p,controls);
+      valid[part]=sane && core::voice_builtin_params(part,builtin->flag,controls,native_returns?1.0f:level);
+    } else valid[part] = core::voice_user_params(part, slot, p, native_returns ? 1.0f : level);
+    if (!valid[part]) {
+      ++param_failures; bad_param = -1; bad_value = level;
+      for (int i = 0; i < 16; ++i)
+        if (!(p[i] >= 0 && p[i] < 128)) { bad_param = i; bad_value = p[i]; break; }
+      core::voice_silence(part);
+    }
+  }
+  void On(unsigned part, float note, float velocity) {
+    part_note[part] = note; part_velocity[part] = velocity;
+    if (valid[part]) {
+      bool ok=dn2_native::builtin::get(handles[part]) ? core::voice_builtin_on(part,note,velocity) : um::native_note_on(part,note,velocity);
+      if(!ok) { ++note_failures;core::voice_silence(part); }
+    }
+  }
+  void Off(unsigned part) { core::voice_note_off(part); }
+  void Kill(unsigned part) { core::voice_silence(part); valid[part] = false; }
+  void Request(unsigned part, const char* id) { if(dn2_native::builtin::find(id)<0) um::native_request(part,id); }
+  void Release(unsigned part) {
+    Kill(part);
+    if (core::hooks.user_leave) core::hooks.user_leave(part);
+    um::native_forget(part);
+  }
+} dn2_sink;
+dn2_native::Parts<Dn2Sink> dn2_parts(dn2_sink);
+}
+bool dn2_native_begin(unsigned track, unsigned returns) {
+  if (core::device::active().id != core::device::kIdDn2 || returns > 1) return false;
+  dn2_sink.native_returns = returns != 0;
+  return dn2_parts.Begin(track);
+}
+bool dn2_native_receive(const uint8_t* packet, unsigned bytes) {
+  return core::device::active().id == core::device::kIdDn2 && dn2_parts.Receive(packet, bytes);
+}
+void dn2_native_end() { dn2_parts.End(); }
+void dn2_native_poll() { dn2_parts.Poll(); }
+bool dn2_native_active() { return dn2_parts.Enabled(); }
 
 static_assert(kVoices == core::kVoices && kBlock == core::kBlock && kMachines == core::kMachines, "bridge sizes");
 static_assert(kLfoJsonCap == core::lfo::kJsonCap, "the /status LFO buffer");
@@ -239,6 +325,30 @@ int samp_json(char* out, int cap) {
   return k;
 }
 bool poly_command(const char* p, char* out, int cap) {
+  if (!strncmp(p, "dn2params=", 10) && p[10] >= '1' && p[10] <= '8' && !p[11]) {
+    const unsigned part = unsigned(p[10] - '1');
+    const auto& r = dn2_parts.Part(part);
+    int at = sniprintf(out, cap, "DN2 params: track %u owner %d valid %u note256 %u velocity32512 %u raw", part+1, r.Owner(), unsigned(dn2_sink.valid[part]), unsigned(dn2_sink.part_note[part]*256), unsigned(dn2_sink.part_velocity[part]*32512));
+    for (unsigned i=0; i<11 && at>=0 && at<cap; ++i)
+      at += sniprintf(out+at, cap-at, " %u", unsigned(dn2_sink.part_params[part][i]*256));
+    return true;
+  }
+  if (!strcmp(p, "dn2stats")) {
+    const auto& r = dn2_parts.Part(0);
+    sniprintf(out, cap, "DN2: owner %d rx %u gaps %u stale %u unavailable %u reset %u state %u on %u off %u kill %u reassign %u; params-fail %u index %d value %d/256 level %d/256 note-fail %u; last flags %u voice %u level %u; kill flags %u voice %u level %u",
+      r.Owner(), r.received, r.gaps, r.stale, r.unavailable, r.resets, r.states, r.ons, r.offs, r.kills, r.owner_changes,
+      dn2_sink.param_failures, dn2_sink.bad_param, int(dn2_sink.bad_value * 256), int(dn2_sink.last_level * 256), dn2_sink.note_failures,
+      r.last.flags, r.last.voice, r.last.level, r.last_kill.flags, r.last_kill.voice, r.last_kill.level);
+    return true;
+  }
+  if (!strcmp(p, "dn2parts")) {
+    int at = sniprintf(out, cap, "DN2: %u parts, returns %s;", dn2_parts.Count(), dn2_sink.native_returns ? "native" : "stereo");
+    for (unsigned i = 0; i < dn2_parts.Count() && at >= 0 && at < cap; ++i) {
+      const auto& r = dn2_parts.Part(i);
+      at += sniprintf(out + at, cap - at, " P%u owner %d on %u state %u kill %u;", i + 1, r.Owner(), r.ons, r.states, r.kills);
+    }
+    return true;
+  }
   return core::poly::command(p, out, cap) || core::msamp::command(p, out, cap) || core::nm::command(p, out, cap) ||   // wt / gr
          core::seq::command(p, out, cap) || core::keys::command(p, out, cap) || core::rytm_dump::command(p, out, cap) || core::ui::fill_command(p, out, cap) ||
          core::song::command(p, out, cap) || core::inst::command(p, out, cap) ||

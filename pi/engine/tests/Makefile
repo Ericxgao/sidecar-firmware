@@ -280,5 +280,7 @@ build/test_content: test_content.cpp $(BRIDGE_SRC) ../bridge.h check.h $(CORE)/b
 build/test_keys_ui: test_keys_ui.cpp $(BRIDGE_SRC) ../bridge.h check.h $(CORE)/build/libcore.dylib
 	@mkdir -p build
 	$(CXX) $(CONTENT_FLAGS) -I.. -o $@ $< $(BRIDGE_SRC) $(CORE)/build/libcore.dylib -Wl,-rpath,$(abspath $(CORE)/build)
+build/test_ob_usb build/test_ob_mirror: $(CORE)/device/dn2_audio.h $(CORE)/device/dn2.h
+
 clean:
 	rm -rf build

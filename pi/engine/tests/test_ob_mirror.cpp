@@ -42,6 +42,15 @@ const Profile* by_usb(uint16_t vid, uint16_t pid) {   // device.cpp's list, with
   static Profile rytm;
   rytm.audio = &out::kRytmMk2;
   if (vid == 0x1935 && pid == 0x0b48) return &rytm;
+  static out::Device audio = [] {
+    auto d = *kDigitakt.audio;
+    d.channels = 8, d.in_channels = 42;
+    d.wire = out::kObDn2;
+    return d;
+  }();
+  static Profile dn2;
+  dn2.audio = &audio;
+  if (vid == 0x1935 && pid == 0xd002) return &dn2; // synthetic fixture ID
   if (vid == kA4Vid && pid == kA4Pid) return g_a4_chosen ? &kA4 : nullptr;
   return vid == kDigitakt.usb_vid && pid == kDigitakt.usb_pid ? &kDigitakt : nullptr;
 }
@@ -85,9 +94,9 @@ struct Box {
   CUSBHostController host;
   CUSBFunction parent{&dev, &host};
   CUSBFunction* ob = nullptr;
-  Box() {
-    dev.config = g_rytm;
-    dev.desc.idVendor = 0x1935, dev.desc.idProduct = 0x0b48;
+  Box(const uint8_t* config = g_rytm, uint16_t pid = 0x0b48) {
+    dev.config = config;
+    dev.desc.idVendor = 0x1935, dev.desc.idProduct = pid;
     ob = RytmObDeviceCreate(&parent);
     CHECK(ob && ob->Configure());
   }
@@ -122,6 +131,21 @@ static bool logged(const char* s) {
 int main() {
   CSidecarGadget::s_pThis = &g_gadget;
   CTimer::s_ticks = 1000;
+
+  { // DN2 host audio must not expose a classic-format computer mirror.
+    uint8_t config[sizeof g_rytm];
+    memcpy(config, g_rytm, sizeof config);
+    config[80] = 0xf4, config[81] = 3;
+    config[137] = 0, config[138] = 1;
+    Box b(config, 0xd002);
+    CHECK(CObUsb::Streaming());
+    CHECK(g_gadget.strings == 0 && g_gadget.box.empty());
+    CHECK(b.host.in.size() == 8 && b.host.in.front()->len == 1012);
+    CObUsb::MirrorWanted();
+    CObUsb::MirrorAttachLate();
+    CHECK(g_gadget.strings == 0 && g_gadget.box.empty());
+    CHECK(b.pipe(0x82) == nullptr && b.pipe(0x81) == nullptr);
+  }
 
   {  // attach: the pipes of interface 3 (bulk OUT 0x02, interrupt IN 0x82), nothing on the audio interfaces' alternates
      // and no SET_INTERFACE beyond the stream's four (interface 3 has only alt 0); MIDI is not a pipe

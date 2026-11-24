@@ -4,7 +4,18 @@
 #pragma once
 #include <stdint.h>
 
+namespace um { struct NativeDescriptor; }
+
 namespace bridge {
+// Cached, read-only native metadata; compiled with the hosted engine headers.
+void dn2_builtin_descriptor(int handle,int track,unsigned selector,um::NativeDescriptor& descriptor);
+// Native DN2 control core entry points. Begin only after a validated handshake;
+// stop on disconnect/timeout. Stock MIDI remains the default until then.
+bool dn2_native_begin(unsigned track, unsigned returns = 0);
+bool dn2_native_receive(const uint8_t* packet, unsigned bytes);
+void dn2_native_end();
+void dn2_native_poll();
+bool dn2_native_active();
 const int kVoices = 8, kBlock = 12, kMachines = 7;   // core::kVoices, kBlock, kMachines (bridge.cpp checks)
 // Before begin(): /Samples/pi-test/sine440.wav (2 s, 440 Hz, 16-bit mono, 48 kHz) and, if the project's pool file
 // is missing, /.rytm/pools/_default.txt naming it as slot 1; nothing that exists is touched. False: no card.
