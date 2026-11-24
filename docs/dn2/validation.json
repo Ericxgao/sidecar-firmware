@@ -1,7 +1,7 @@
 {
   "scope": "Merge proposal; phased offline evidence, no device installation or complete CI pass",
   "base": "28abf096435cdad21900810d887ec12361b7b61f",
-  "code_revision": "5b9405dd865490b863ef1d6fb7ced536b0945b77",
+  "code_revision": "857d21aa72a195d701909544555b6348615a0848",
   "platform": "Ubuntu 24.04 / WSL / GCC 13 / Node 22.23.5; Windows LLVM-MinGW for driver interoperability",
   "native_portable": "passed",
   "dependency_skips": [
@@ -56,5 +56,6 @@
     "clean Pi kernel build",
     "live Rytm regression and boot order",
     "new candidate hardware/audio timing qualification"
-  ]
+  ],
+  "revision_note": "Public no-reply author metadata; source tree preserved. This receipt-only update does not change tested code."
 }
